@@ -76,10 +76,10 @@ npm start          # build and launch
 ```bash
 npm run build      # build renderer/bundle.js only
 npm run smoke      # build + launch smoke test (exits automatically)
-node tools/package-portable.cjs   # build the Windows portable zip into dist/
+npm run package    # build + package the Windows portable zip into dist/
 ```
 
-If the window never appears, check whether the environment variable `ELECTRON_RUN_AS_NODE` is set — it makes Electron run as plain Node. Unset it, or use `启动简写.bat`, which clears it for you.
+If the window never appears, check whether the environment variable `ELECTRON_RUN_AS_NODE` is set — it makes Electron run as plain Node. Unset it before launching (`Remove-Item Env:ELECTRON_RUN_AS_NODE` in PowerShell, or `set ELECTRON_RUN_AS_NODE=` in cmd).
 
 ## Privacy & security
 

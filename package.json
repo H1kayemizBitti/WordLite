@@ -9,7 +9,8 @@
   "scripts": {
     "build": "esbuild ./renderer/app.js --bundle --outfile=./renderer/bundle.js --format=iife --target=chrome130",
     "start": "npm run build && electron .",
-    "smoke": "npm run build && electron . --smoke"
+    "smoke": "npm run build && electron . --smoke",
+    "package": "npm run build && node tools/package-portable.cjs"
   },
   "devDependencies": {
     "electron": "^45.0.0",

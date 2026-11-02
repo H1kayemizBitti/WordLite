@@ -94,10 +94,9 @@ npm start          # 构建并启动
 ```bash
 npm run build      # 只构建渲染进程 renderer/bundle.js
 npm run smoke      # 构建 + 启动冒烟测试（自动退出）
-node tools/package-portable.cjs   # 打包 Windows 便携版到 dist/
+npm run package    # 构建 + 打包 Windows 便携版到 dist/
 ```
 
-Windows 用户也可以直接双击根目录的 `启动简写.bat`（开发运行）和 `打包便携版.bat`（打包）。
 
 <details>
 <summary><b>项目结构</b></summary>
@@ -144,7 +143,7 @@ docs/                   README 截图
 确认解压的是完整文件夹（含 `resources`、各种 `.dll`），不要只拷贝 `WordLite.exe`。
 
 **从源码 `npm start` 不出窗口？**
-如果系统里设置了环境变量 `ELECTRON_RUN_AS_NODE`，Electron 会以纯 Node 模式运行。删除该变量，或改用 `启动简写.bat`（会自动清掉它）。
+如果系统里设置了环境变量 `ELECTRON_RUN_AS_NODE`，Electron 会以纯 Node 模式运行。先删除该变量再运行：PowerShell 用 `Remove-Item Env:ELECTRON_RUN_AS_NODE`，cmd 用 `set ELECTRON_RUN_AS_NODE=`。
 
 **文件存在哪？**
 你保存到哪里就在哪里。自动保存的恢复副本在 `%APPDATA%\简写\autosave.json`，正常保存或选择「不保存」关闭后会清理。

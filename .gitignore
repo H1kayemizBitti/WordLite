@@ -7,3 +7,5 @@ renderer/bundle.js
 *.log
 .DS_Store
 Thumbs.db
+/启动简写.bat
+/打包便携版.bat
