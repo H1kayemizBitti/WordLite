@@ -3,7 +3,7 @@
   "productName": "简写",
   "version": "0.1.0",
   "private": true,
-  "description": "本地写字板：纯文字排版与打印（离线）",
+  "description": "离线、轻量的桌面写字板：DOCX 编辑、打印与 PDF 导出",
   "license": "MIT",
   "main": "main.js",
   "scripts": {
