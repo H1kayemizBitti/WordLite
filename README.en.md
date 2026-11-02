@@ -43,6 +43,7 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 3. Run `WordLite.exe`
 
 > If the release provides split parts (`.zip.001`, `.zip.002`, ...), download **all parts** plus `JoinParts.ps1` and `合并解压.bat` into one folder, then run `合并解压.bat` to rebuild the zip before extracting.
+> If the parts are named `WordLite-...-part01.zip`, download all part zips plus `JoinZipParts.ps1` and `合并解压.bat`, then run `合并解压.bat` in the same way.
 
 > Portable: no installer, no registry entries — delete the folder to uninstall.
 > Builds are not code-signed yet. If SmartScreen shows "Windows protected your PC", click **More info → Run anyway**.
