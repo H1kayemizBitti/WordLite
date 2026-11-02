@@ -103,6 +103,11 @@ For bug reports, attaching a (sanitized) sample document that reproduces the pro
 
 [Electron](https://www.electronjs.org/) · [TipTap](https://tiptap.dev/) / [ProseMirror](https://prosemirror.net/) · [docx](https://github.com/dolanmiu/docx) · [mammoth](https://github.com/mwilliamson/mammoth.js) · [JSZip](https://stuk.github.io/jszip/)
 
+### AI assistance
+
+- [DeepSeek](https://www.deepseek.com/) — development assistance
+- [Kimi](https://kimi.moonshot.cn/) — development assistance
+
 ## License
 
 [MIT](LICENSE)

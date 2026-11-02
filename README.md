@@ -164,6 +164,11 @@ npm run smoke
 - [mammoth](https://github.com/mwilliamson/mammoth.js) — DOCX 导入
 - [JSZip](https://stuk.github.io/jszip/) — DOCX 打包解包
 
+### AI 辅助
+
+- [DeepSeek](https://www.deepseek.com/) — 开发辅助
+- [Kimi](https://kimi.moonshot.cn/) — 开发辅助
+
 ## 许可证
 
 [MIT](LICENSE)
