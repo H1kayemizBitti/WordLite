@@ -186,6 +186,7 @@ function createWindow () {
     minWidth: 860,
     minHeight: 600,
     backgroundColor: '#ffffff',
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
     title: '未命名文档 - 简写',
     show: !isSmoke,           // 冒烟测试时不弹窗
     autoHideMenuBar: true,

@@ -59,16 +59,40 @@ fs.mkdirSync(outDir, { recursive: true })
 
 console.log('复制 Electron 运行时...')
 fs.cpSync(electronDist, outDir, { recursive: true })
-fs.renameSync(path.join(outDir, 'electron.exe'), path.join(outDir, 'WordLite.exe'))
+const exePath = path.join(outDir, 'WordLite.exe')
+fs.renameSync(path.join(outDir, 'electron.exe'), exePath)
 
 const appDir = path.join(outDir, 'resources', 'app')
 fs.mkdirSync(appDir, { recursive: true })
 for (const file of ['main.js', 'preload.js']) {
   fs.copyFileSync(path.join(root, file), path.join(appDir, file))
 }
+fs.cpSync(path.join(root, 'assets'), path.join(appDir, 'assets'), { recursive: true })
 fs.mkdirSync(path.join(appDir, 'renderer'), { recursive: true })
 for (const file of ['index.html', 'style.css', 'bundle.js']) {
   fs.copyFileSync(path.join(root, 'renderer', file), path.join(appDir, 'renderer', file))
+}
+
+// 给 exe 写入图标和版本信息；失败时继续用 Electron 默认图标
+const rcedit = path.join(root, 'node_modules', 'rcedit', 'bin', 'rcedit-x64.exe')
+if (fs.existsSync(rcedit)) {
+  try {
+    console.log('写入 exe 图标和版本信息...')
+    execFileSync(rcedit, [
+      exePath,
+      '--set-icon', path.join(root, 'assets', 'icon.ico'),
+      '--set-file-version', pkg.version,
+      '--set-product-version', pkg.version,
+      '--set-version-string', 'FileDescription', '简写 WordLite',
+      '--set-version-string', 'ProductName', '简写',
+      '--set-version-string', 'CompanyName', 'WordLite',
+      '--set-version-string', 'LegalCopyright', 'Copyright (c) 2026 WordLite contributors'
+    ], { stdio: 'inherit' })
+  } catch (error) {
+    console.warn('exe 图标写入失败，继续使用默认图标:', error.message)
+  }
+} else {
+  console.warn('未安装 rcedit，exe 将继续使用 Electron 默认图标')
 }
 fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({
   name: 'wordlite',

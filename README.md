@@ -1,8 +1,16 @@
-# 简写 WordLite
+<p align="center">
+  <img src="assets/icon.png" width="112" alt="简写图标">
+</p>
 
-一个 Windows 本地离线写字板。使用 Electron + TipTap，界面用原生 HTML/CSS/JavaScript。
+<h1 align="center">简写 WordLite</h1>
+
+<p align="center">一个安静、离线、专注写字的 Windows 桌面工具。</p>
+
+<p align="center"><code>Windows 10/11</code> · <code>Electron 45</code> · <code>MIT</code></p>
 
 文件只在本地读写，不上传、不联网、不需要账号。
+
+![简写界面](docs/screenshot.png)
 
 ## 功能
 
