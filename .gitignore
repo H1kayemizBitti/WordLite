@@ -1,0 +1,9 @@
+node_modules/
+dist/
+backup-*/
+.tmp-test/
+验收测试/
+renderer/bundle.js
+*.log
+.DS_Store
+Thumbs.db
