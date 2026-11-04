@@ -1,21 +1,19 @@
 {
   "name": "wordlite",
   "productName": "简写",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "离线、轻量的桌面写字板：DOCX 编辑、打印与 PDF 导出",
   "license": "MIT",
-  "main": "main.js",
   "scripts": {
     "build": "esbuild ./renderer/app.js --bundle --outfile=./renderer/bundle.js --format=iife --target=chrome130",
-    "start": "npm run build && electron .",
-    "smoke": "npm run build && electron . --smoke",
-    "package": "npm run build && node tools/package-portable.cjs"
+    "tauri": "tauri",
+    "tauri:dev": "npm run build && tauri dev",
+    "tauri:build": "npm run build && tauri build"
   },
   "devDependencies": {
-    "electron": "^45.0.0",
-    "esbuild": "^0.28.2",
-    "rcedit": "^5.0.2"
+    "@tauri-apps/cli": "^2",
+    "esbuild": "^0.28.2"
   },
   "dependencies": {
     "@tiptap/core": "^3.32.0",

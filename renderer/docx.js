@@ -2,6 +2,7 @@
 import mammoth from 'mammoth'
 import JSZip from 'jszip'
 import { generateJSON } from '@tiptap/core'
+import { normalizeHexColor } from './extensions.js'
 import {
   AlignmentType,
   BorderStyle,
@@ -368,7 +369,7 @@ function runOptions (node) {
     italics: hasMark(node, 'italic') || undefined,
     strike: hasMark(node, 'strike') || undefined,
     underline: hasMark(node, 'underline') ? { type: UnderlineType.SINGLE } : undefined,
-    color: textStyle.color ? textStyle.color.replace(/^#/, '') : undefined,
+    color: normalizeHexColor(textStyle.color)?.slice(1),
     highlight: highlight ? HIGHLIGHTS[highlight.attrs?.color] || HighlightColor.YELLOW : undefined,
     font: textStyle.fontFamily ? textStyle.fontFamily.split(',')[0].replace(/["']/g, '') : undefined,
     size: Number.isFinite(fontSize) ? Math.round(fontSize * 2) : undefined,
@@ -547,7 +548,7 @@ async function table (node, context = {}) {
       const attrs = cell.attrs || {}
       const columnSpan = Math.min(63, Math.max(1, Number(attrs.colspan) || 1))
       const rowSpan = Math.min(63, Math.max(1, Number(attrs.rowspan) || 1))
-      const background = /^#[0-9a-f]{6}$/i.test(attrs.background || '') ? attrs.background.slice(1).toUpperCase() : undefined
+      const background = normalizeHexColor(attrs.background)?.slice(1).toUpperCase()
       cells.push(new TableCell({
         children: children.length ? children : [new Paragraph('')],
         columnSpan: columnSpan > 1 ? columnSpan : undefined,
@@ -559,7 +560,7 @@ async function table (node, context = {}) {
     rows.push(new TableRow({ children: cells }))
   }
   const sizePt = Math.max(0, Number(tableAttrs.borderSize) || 0)
-  const color = /^#[0-9a-f]{6}$/i.test(tableAttrs.borderColor || '') ? tableAttrs.borderColor.slice(1).toUpperCase() : 'BFBFBF'
+  const color = normalizeHexColor(tableAttrs.borderColor)?.slice(1).toUpperCase() || 'BFBFBF'
   const border = sizePt > 0
     ? { style: BorderStyle.SINGLE, size: Math.max(2, Math.min(96, Math.round(sizePt * 8))), color }
     : { style: BorderStyle.NONE, size: 0, color: 'auto' }
@@ -643,7 +644,7 @@ export async function jsonToDocxBase64 (json, pageSetup = {}, defaults = {}) {
     creator: '简写 WordLite',
     title: '简写文档',
     description: '由简写 WordLite 生成',
-    background: { color: setup.background.replace(/^#/, '').toUpperCase() },
+    background: { color: (normalizeHexColor(setup.background) || '#ffffff').slice(1).toUpperCase() },
     styles: {
       default: {
         document: {

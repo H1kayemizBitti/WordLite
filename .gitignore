@@ -9,3 +9,7 @@ renderer/bundle.js
 Thumbs.db
 /启动简写.bat
 /打包便携版.bat
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/schemas/

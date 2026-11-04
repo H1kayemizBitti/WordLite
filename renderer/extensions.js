@@ -1,7 +1,8 @@
 // 自定义 TipTap 扩展：缩进、段距、字距、行距、字号、上下标、图片、表格
 // Word 的语义是"段落/字符属性"，官方扩展没有现成的，按需自行实现
 import { Extension, Mark, Node } from '@tiptap/core'
-import { Plugin } from '@tiptap/pm/state'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { Image as BaseImage } from '@tiptap/extension-image'
 import { Table as BaseTable, TableView as BaseTableView } from '@tiptap/extension-table'
 import { TableCell as BaseTableCell } from '@tiptap/extension-table-cell'
@@ -331,13 +332,40 @@ export const WordImage = BaseImage.extend({
   }
 })
 
+const COLOR_NAMES = {
+  black: '#000000',
+  white: '#ffffff',
+  red: '#ff0000',
+  green: '#008000',
+  blue: '#0000ff',
+  yellow: '#ffff00',
+  gray: '#808080',
+  grey: '#808080',
+  orange: '#ffa500',
+  purple: '#800080'
+}
+
+// 把 CSS 颜色统一成 #rrggbb；识别不了返回 null，避免把非法值写进 DOCX
+export function normalizeHexColor (value) {
+  if (typeof value !== 'string') return null
+  const text = value.trim().toLowerCase()
+  if (!text) return null
+  if (/^#[0-9a-f]{6}$/.test(text)) return text
+  if (/^#[0-9a-f]{3}$/.test(text)) {
+    return `#${text.slice(1).split('').map((ch) => ch + ch).join('')}`
+  }
+  const match = text.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
+  if (match) {
+    return `#${[match[1], match[2], match[3]]
+      .map((n) => Math.min(255, Number(n)).toString(16).padStart(2, '0'))
+      .join('')}`
+  }
+  return COLOR_NAMES[text] || null
+}
+
 function colorFromElement (el) {
   const value = el.getAttribute('data-cell-background') || el.style.backgroundColor || el.getAttribute('bgcolor')
-  if (!value) return null
-  if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase()
-  const match = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i)
-  if (!match) return null
-  return `#${[match[1], match[2], match[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`
+  return normalizeHexColor(value)
 }
 
 function cellBackgroundAttribute () {
@@ -465,6 +493,40 @@ export const PlainTextInput = Extension.create({
             tr.setMeta('addToHistory', false)
           }
           return true
+        }
+      }
+    })]
+  }
+})
+
+// 查找高亮：只负责把匹配区间画成装饰，查找状态由 app.js 驱动
+export const findHighlightKey = new PluginKey('findHighlight')
+
+export const FindHighlight = Extension.create({
+  name: 'findHighlight',
+
+  addProseMirrorPlugins () {
+    return [new Plugin({
+      key: findHighlightKey,
+      state: {
+        init: () => DecorationSet.empty,
+        apply (tr, old) {
+          const meta = tr.getMeta(findHighlightKey)
+          if (meta) {
+            if (!meta.ranges?.length) return DecorationSet.empty
+            return DecorationSet.create(tr.doc, meta.ranges.map((range, index) => Decoration.inline(
+              range.from,
+              range.to,
+              { class: index === meta.active ? 'find-match find-match-current' : 'find-match' }
+            )))
+          }
+          if (tr.docChanged) return old.map(tr.mapping, tr.doc)
+          return old
+        }
+      },
+      props: {
+        decorations (state) {
+          return findHighlightKey.getState(state)
         }
       }
     })]

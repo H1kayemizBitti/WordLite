@@ -33,6 +33,24 @@ body {
   user-select: none;
 }
 
+/* 拖放文档时的整窗提示 */
+body.file-drag-over::after {
+  content: '松开以打开文档（.docx / .txt）';
+  position: fixed;
+  inset: 14px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(43, 95, 208, 0.08);
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  color: var(--accent);
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
 /* 滚动条 */
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -498,6 +516,113 @@ body {
   box-shadow: 0 0 0 2px rgba(34, 160, 107, 0.18);
 }
 
+/* ---------- 查找替换 ---------- */
+
+.find-bar {
+  position: fixed;
+  top: 150px;
+  right: 26px;
+  z-index: 40;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #ffffff;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-pop);
+}
+
+.find-bar[hidden] { display: none; }
+
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.find-row[hidden] { display: none; }
+
+.find-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  user-select: text;
+}
+
+.find-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.find-input.no-result {
+  border-color: #d92d20;
+  box-shadow: 0 0 0 2px rgba(217, 45, 32, 0.12);
+}
+
+.find-count {
+  min-width: 52px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.find-btn {
+  flex: none;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #4b5563;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.find-btn:hover { background: var(--hover-bg); }
+.find-btn:active { background: #e3e7ed; }
+
+.find-btn.case.active {
+  background: var(--active-bg);
+  color: var(--accent);
+}
+
+.find-btn.text {
+  padding: 0 10px;
+  border-color: var(--border-strong);
+  background: #fff;
+  font-size: 12.5px;
+}
+
+.find-btn.text:hover { background: var(--hover-bg); }
+
+.find-btn.close { font-size: 17px; }
+
+.ProseMirror .find-match {
+  background: #ffe58a;
+  border-radius: 2px;
+}
+
+.ProseMirror .find-match-current {
+  background: #ffb020;
+  box-shadow: 0 0 0 1px #d98e00;
+}
+
 /* ---------- ProseMirror ---------- */
 
 #editor { outline: none; }
@@ -798,12 +923,98 @@ body {
 }
 .help-dialog { width: min(680px, 92vw); }
 
+/* ---------- 帮助标签页 ---------- */
+
+.help-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.help-tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.help-tab:hover { color: var(--text); }
+.help-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.help-panel[hidden] { display: none; }
+
+.help-body { padding-top: 14px; }
+
+.help-list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: #4b5563;
+}
+
+.help-list li { margin-bottom: 4px; }
+.help-list strong { color: var(--text); }
+.help-list code {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11.5px;
+  background: #f4f5f7;
+  border-radius: 4px;
+  padding: 1px 5px;
+  user-select: text;
+}
+
+.help-text { font-size: 12.5px; line-height: 1.8; color: #4b5563; }
+
+.help-about-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.help-about-mark {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #3f74e0, var(--accent-strong));
+  color: #fff;
+  font-size: 26px;
+  font-weight: 600;
+  box-shadow: 0 6px 16px rgba(43, 95, 208, 0.28);
+}
+
+.help-about-name { font-size: 16px; font-weight: 600; }
+.help-about-sub { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
+
+.help-about-meta {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px 14px;
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: #4b5563;
+}
+
+.help-about-meta > span:nth-child(odd) { color: var(--text-dim); }
+
 /* ---------- 打印预览 ---------- */
 
 .preview-dialog { width: min(940px, 94vw); height: min(90vh, 980px); max-height: 92vh; }
 .preview-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--border);
@@ -848,7 +1059,7 @@ body {
   html, body {
     height: auto;
     overflow: visible;
-    background: #ffffff !important;
+    background: var(--paper) !important;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
@@ -858,7 +1069,7 @@ body {
     display: block;
     overflow: visible;
     padding: 0;
-    background: #ffffff !important;
+    background: transparent !important;
   }
   .paper {
     width: 100% !important;
@@ -868,9 +1079,11 @@ body {
     padding: 0 !important;
     box-shadow: none !important;
     background-image: none !important;
-    background-color: #ffffff !important;
+    background-color: var(--paper) !important;
   }
   .ProseMirror { min-height: 0; }
+  .ProseMirror-selectednode { outline: none !important; }
+  .ProseMirror p.is-editor-empty:first-child::before { content: none !important; }
   .ProseMirror .column-resize-handle { display: none !important; }
   .ProseMirror .page-break {
     clear: both;
@@ -880,4 +1093,6 @@ body {
   }
   .ProseMirror .page-break span { display: none; }
   .ProseMirror table, .ProseMirror img { break-inside: avoid; }
+  .find-bar { display: none !important; }
+  .ProseMirror .find-match { background: transparent !important; box-shadow: none !important; }
 }

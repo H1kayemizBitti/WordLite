@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-2b5fd0">
   <img alt="Offline" src="https://img.shields.io/badge/network-100%25%20offline-2e9e6b">
-  <img alt="Electron" src="https://img.shields.io/badge/Electron-45-47848f">
+  <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24c8db">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-f0a020">
 </p>
 
@@ -26,37 +26,37 @@
 
 ## 为什么做它
 
-写一份通知、一篇稿子、一张带表格的清单，往往不需要一整套 Office，也不想把文件传到云端。
+写一份通知、一篇稿子、一张带表格的清单，往往不需要一整套 Office或AI工具，也不想把文件传到云端。
 简写只做一件事：**在本机把文字排好、存成 DOCX，或者直接打印 / 导出 PDF**。
 
-- 🔒 **完全离线**：应用内拦截所有网络请求，文件只经过系统对话框读写
+- 🔒 **完全离线**：应用不发起网络请求，文件只经过系统对话框读写
 - 📄 **认 DOCX**：能打开 Word / WPS 文档，保存后也能被它们正常打开
-- 🪶 **上手零成本**：熟悉的「开始 / 插入 / 布局 / 文件」功能区，常用快捷键和 Word 一致
+- 🪶 **足够轻**：Tauri 2 + 系统 WebView2，安装包约 2.6MB，启动快、内存占用低
+- 🪟 **多窗口**：拖入文件或右键「打开方式」会新开独立窗口，方便并排对比；应用内打开留在当前窗口
 - 💾 **不怕丢稿**：定时自动保存，意外关闭后重新打开可恢复
 
 ## 下载使用
 
-1. 到 [Releases](../../releases/latest) 下载 `WordLite-<版本>-portable.zip`
-2. 解压到任意文件夹（**整个文件夹都要保留**，不能只拷 exe）
-3. 双击 `WordLite.exe`
+1. 到 [Releases](../../releases/latest) 下载 `WordLite_<版本>_x64-setup.exe`
+2. 双击安装
+3. 从开始菜单或桌面启动
 
-> 如果 Release 提供的是 `.zip.001`、`.zip.002` 分卷：把**全部分卷**和 `JoinParts.ps1`、`合并解压.bat` 下载到同一个文件夹，双击 `合并解压.bat`，会重新生成完整 zip，再解压即可。
-> 如果分卷是 `WordLite-...-part01.zip` 这种形式：下载全部 part zip 和 `JoinZipParts.ps1`、`合并解压.bat`，同样双击 `合并解压.bat`。
-
-> 免安装、不写注册表，删掉文件夹即卸载。
 > 程序暂未做代码签名，首次运行若出现「Windows 已保护你的电脑」，点 **更多信息 → 仍要运行**。
+> 需要 Microsoft Edge WebView2 运行时；Windows 11 和大部分 Windows 10 已自带。
 
 ## 功能一览
 
 | 类别 | 能做什么 |
 | --- | --- |
-| 文件 | 打开 / 保存 DOCX、TXT（自动识别 UTF-8、UTF-16、GBK），最近文件，自动保存与崩溃恢复 |
+| 文件 | 打开 / 保存 DOCX、TXT（自动识别 UTF-8、UTF-16、GBK），双击 / 右键「打开方式」/ 拖入窗口打开，最近文件，自动保存与崩溃恢复 |
+| 编辑 | 查找 / 替换，区分大小写，高亮全部匹配并逐个跳转 |
+| 窗口 | 应用内打开留在当前窗口（未保存时提示保存 / 不保存 / 取消）；拖入或右键打开时新开独立窗口 |
 | 文字 | 字体、字号、颜色、高亮、加粗、斜体、下划线、删除线、上标、下标、字符间距、格式刷 |
 | 段落 | 标题 1–3、对齐、缩进、行距、段前段后间距、项目符号、编号列表 |
 | 表格 | 插入、拖动列宽、合并 / 拆分单元格、单元格底色、边框粗细与颜色 |
 | 图片 | 插入、精确缩放、左 / 中 / 右对齐、文字环绕、裁剪、更换、删除 |
 | 页面 | 纸张大小、横竖方向、自定义页边距、页面背景色、分页符 |
-| 输出 | 打印预览、指定页码范围与份数、导出 PDF |
+| 输出 | 打印（在系统打印面板选择页码范围、份数）、打印预览、导出 PDF |
 
 <details>
 <summary><b>快捷键</b>（应用内按 <kbd>F1</kbd> 也能看）</summary>
@@ -65,6 +65,7 @@
 | --- | --- |
 | 新建 / 打开 / 保存 / 另存为 | <kbd>Ctrl+N</kbd> / <kbd>Ctrl+O</kbd> / <kbd>Ctrl+S</kbd> / <kbd>Ctrl+Shift+S</kbd> |
 | 打印预览 | <kbd>Ctrl+P</kbd> |
+| 查找 / 替换 | <kbd>Ctrl+F</kbd> / <kbd>Ctrl+H</kbd> |
 | 加粗 / 斜体 / 下划线 | <kbd>Ctrl+B</kbd> / <kbd>Ctrl+I</kbd> / <kbd>Ctrl+U</kbd> |
 | 删除线 | <kbd>Ctrl+Shift+X</kbd> |
 | 上标 / 下标 | <kbd>Ctrl+Shift+=</kbd> / <kbd>Ctrl+=</kbd> |
@@ -80,41 +81,54 @@
 
 ## 从源码运行
 
-需要 [Node.js](https://nodejs.org/) 22 或更高版本。
+需要：
+
+- [Node.js](https://nodejs.org/) 22 或更高版本
+- [Rust](https://rustup.rs/) stable 工具链
+- Visual Studio Build Tools（C++ 工作负载）和 Windows SDK
+- Microsoft Edge WebView2 运行时
 
 ```bash
 git clone <本仓库地址>
-cd wordlite
+cd WordLite
 npm install
-npm start          # 构建并启动
+npm run tauri:dev     # 构建前端并启动 Tauri 窗口
 ```
 
-其他命令：
+构建安装包：
 
 ```bash
-npm run build      # 只构建渲染进程 renderer/bundle.js
-npm run smoke      # 构建 + 启动冒烟测试（自动退出）
-npm run package    # 构建 + 打包 Windows 便携版到 dist/
+npm run tauri:build   # 产物在 src-tauri/target/release/bundle/nsis/
+npm run build         # 只重建 renderer/bundle.js
 ```
 
+自测：
+
+```bash
+src-tauri/target/release/wordlite.exe --selftest
+```
+
+> 首次打包会从 GitHub 下载 NSIS 工具。
 
 <details>
 <summary><b>项目结构</b></summary>
 
 ```text
-main.js                 主进程：窗口、文件读写、打印 / PDF
-preload.js              通过 contextBridge 暴露的最小 API
+src-tauri/              Tauri 2 / Rust 主进程
+  src/lib.rs            窗口、文件、自动保存、打印 / PDF
+  tauri.conf.json       窗口、CSP、打包配置
+  capabilities/         权限（main 与 doc-* 窗口）
 renderer/
   index.html            界面结构
   style.css             界面与打印样式
   app.js                编辑器、功能区、文件、打印、设置
   docx.js               DOCX 导入 / 导出
   extensions.js         TipTap 自定义扩展（表格、图片、段落格式等）
+  tauri-bridge.js       Tauri 下的 window.wordlite 兼容层
 tools/
-  package-portable.cjs  便携版打包脚本
   make-icon.py          图标生成脚本（Python + Pillow）
 assets/                 应用图标
-docs/                   README 截图
+docs/                   README 截图与迁移笔记
 ```
 
 `renderer/bundle.js` 是构建产物，不进仓库。
@@ -123,44 +137,44 @@ docs/                   README 截图
 
 ## 隐私与安全
 
-- 渲染进程开启 `contextIsolation` + `sandbox`，关闭 `nodeIntegration`
-- 只通过 preload 暴露有限的文件 / 打印接口
-- 拦截全部 `http` / `https` / `ws` / `wss` 请求，应用本身不会联网
-- 除剪贴板读取外，拒绝所有浏览器权限请求
+- Tauri 2 + Rust 后端，前端只能调用白名单内的命令
+- 文件通过系统原生对话框读写，不经过浏览器上传
+- CSP 限制为 `default-src 'self'`，应用本身不发起网络请求
 - 无统计、无遥测、无自动更新
 
 ## 已知限制
 
-- 目前只打包和测试了 Windows；macOS / Linux 可从源码运行，但未经验证
-- 打印 / PDF 按分页符分页，长段落自动换页的位置可能和屏幕显示略有差异
+- 目前只打包和测试了 Windows 10 / 11；macOS 适配进行中（WKWebView 打印 / PDF 尚未完成）
+- 打印预览按块级内容自动分页；单个没有分段的超长段落不会在预览里按行拆开（PDF / 打印引擎仍会按行分页）
 - 文本框、嵌套表格、复杂域等 DOCX 对象导入时会被简化
 - 图片文字环绕支持左右两种
-- 发布包暂无代码签名和安装程序
+- 发布包暂无代码签名
 
 ## 常见问题
 
-**双击 exe 没反应？**
-确认解压的是完整文件夹（含 `resources`、各种 `.dll`），不要只拷贝 `WordLite.exe`。
+**双击安装包没反应或提示「已保护你的电脑」？**
+程序暂未签名，点「更多信息 → 仍要运行」。安装完成后从开始菜单启动。
 
-**从源码 `npm start` 不出窗口？**
-如果系统里设置了环境变量 `ELECTRON_RUN_AS_NODE`，Electron 会以纯 Node 模式运行。先删除该变量再运行：PowerShell 用 `Remove-Item Env:ELECTRON_RUN_AS_NODE`，cmd 用 `set ELECTRON_RUN_AS_NODE=`。
+**提示缺少 WebView2？**
+安装 Microsoft Edge [WebView2](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2) Runtime（Windows 11 和大部分 Windows 10 已自带）。
 
 **文件存在哪？**
-你保存到哪里就在哪里。自动保存的恢复副本在 `%APPDATA%\简写\autosave.json`，正常保存或选择「不保存」关闭后会清理。
+你保存到哪里就在哪里。自动保存的恢复副本在 `%APPDATA%\com.h1kayemizbitti.wordlite\autosave-*.json`，正常保存或选择「不保存」关闭后会清理。
 
 ## 参与贡献
 
-欢迎提 Issue 和 Pull Request。提交前请至少跑一遍：
+欢迎提 Issue 和 Pull Request。提交前请至少跑一遍构建和自测：
 
 ```bash
-npm run smoke
+npm run tauri:build
+src-tauri/target/release/wordlite.exe --selftest
 ```
 
 修 Bug 时附上能复现问题的文档样本（去掉隐私内容），会大大加快处理速度。
 
 ## 致谢
 
-- [Electron](https://www.electronjs.org/) — 桌面外壳
+- [Tauri](https://tauri.app/) / [WebView2](https://learn.microsoft.com/microsoft-edge/webview2/) — 桌面外壳
 - [TipTap](https://tiptap.dev/) / [ProseMirror](https://prosemirror.net/) — 编辑器内核
 - [docx](https://github.com/dolanmiu/docx) — DOCX 导出
 - [mammoth](https://github.com/mwilliamson/mammoth.js) — DOCX 导入
@@ -170,6 +184,7 @@ npm run smoke
 
 - [DeepSeek](https://www.deepseek.com/) — 开发辅助
 - [Kimi](https://kimi.moonshot.cn/) — 开发辅助
+- [Claude](https://claude.ai) — 开发辅助
 
 ## 许可证
 

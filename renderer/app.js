@@ -9,8 +9,10 @@ import { Color } from '@tiptap/extension-color'
 import { FontFamily } from '@tiptap/extension-font-family'
 import { TableRow } from '@tiptap/extension-table-row'
 import { CharacterCount, Placeholder } from '@tiptap/extensions'
-import { EditorState } from '@tiptap/pm/state'
+import { EditorState, TextSelection } from '@tiptap/pm/state'
 import {
+  FindHighlight,
+  findHighlightKey,
   Indent,
   LineHeight,
   FontSize,
@@ -92,6 +94,7 @@ let currentFormat = 'docx'
 let dirty = false
 let loadingDocument = false
 let saveInProgress = false
+let txtWarningAccepted = false
 let statusTimer = null
 let autosaveTimer = null
 let formatPainter = null
@@ -198,7 +201,8 @@ const editorExtensions = [
   WordTableCell,
   CharacterCount,
   Placeholder.configure({ placeholder: '开始输入…' }),
-  PlainTextInput
+  PlainTextInput,
+  FindHighlight
 ]
 
 const editor = new Editor({
@@ -671,7 +675,17 @@ function changeFontSize (delta) {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closePopovers()
+  if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
+    // 有模态对话框时交给对话框自己处理，Esc 只关最上层
+    if (!document.querySelector('dialog[open]')) {
+      if (!findBar.hidden) {
+        e.preventDefault()
+        closeFind()
+        return
+      }
+      closePopovers()
+    }
+  }
   if (e.isComposing || e.defaultPrevented) return
 
   if (e.key === 'F1') {
@@ -687,6 +701,12 @@ document.addEventListener('keydown', (e) => {
   if (key === 's') {
     e.preventDefault()
     saveDocument(e.shiftKey)
+    return
+  }
+  // 查找/替换优先于普通表单输入，但设置、帮助等模态框打开时不抢快捷键
+  if (!e.shiftKey && (key === 'f' || key === 'h') && !document.querySelector('dialog[open]')) {
+    e.preventDefault()
+    openFind(key === 'h' ? 'replace' : 'find')
     return
   }
   if (inForm) return
@@ -856,6 +876,8 @@ function applyPageSetup () {
   paper.style.minHeight = `${dimensions.height}cm`
   paper.style.padding = `${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm`
   paper.style.setProperty('--paper', pageSetup.background)
+  // 打印时页面背景色要铺满整张纸，根元素也同步一份
+  document.documentElement.style.setProperty('--paper', pageSetup.background)
   paper.style.setProperty('--margin-top', `${margins.top}cm`)
   paper.style.setProperty('--margin-right', `${margins.right}cm`)
   paper.style.setProperty('--margin-bottom', `${margins.bottom}cm`)
@@ -926,6 +948,7 @@ function handleEditorUpdate () {
   updateStatusBar()
   syncToolbar()
   if (!loadingDocument) setDirty(true)
+  if (!findBar.hidden) scheduleFindRefresh()
 }
 
 function setEditorJSON (json) {
@@ -959,11 +982,23 @@ function currentJSON () {
   return editor.getJSON()
 }
 
+const INLINE_NODES = ['text', 'hardBreak', 'image']
+
 function nodeText (node) {
   if (node.type === 'text') return node.text || ''
   if (node.type === 'hardBreak') return '\n'
   if (node.type === 'image') return node.attrs?.alt || ''
-  return (node.content || []).map(nodeText).join('')
+  const children = node.content || []
+  // 只有全是行内节点时才直接拼接；块级子节点之间换行，避免列表项粘成一串
+  const inline = children.every((child) => INLINE_NODES.includes(child.type))
+  return children.map(nodeText).join(inline ? '' : '\n')
+}
+
+function hasRichFormatting (node) {
+  if (!node) return false
+  if (node.type === 'heading' || node.type === 'image' || node.type === 'table') return true
+  if (node.marks?.length) return true
+  return (node.content || []).some(hasRichFormatting)
 }
 
 function plainBlock (node) {
@@ -996,6 +1031,13 @@ function resetDocumentPosition () {
 
 async function canDiscardChanges () {
   if (!dirty) return true
+  // 新版本提供三选一：保存 / 不保存 / 取消；旧 preload 回退到二选一
+  if (fileApi.confirmSaveChanges) {
+    const choice = await fileApi.confirmSaveChanges()
+    if (choice === 'cancel') return false
+    if (choice === 'save') return await saveDocument()
+    return true
+  }
   return fileApi.confirmAction('当前文档有未保存的更改，继续将丢失这些更改。是否继续？')
 }
 
@@ -1021,6 +1063,7 @@ async function newDocument () {
   currentPath = null
   currentFileName = '未命名文档'
   currentFormat = 'docx'
+  txtWarningAccepted = false
   pageSetup = pageSetupFromSettings()
   setEditorJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
   applyPageSetup()
@@ -1052,6 +1095,7 @@ async function loadFile (filePath) {
     currentPath = filePath
     currentFileName = fileNameFromPath(filePath)
     currentFormat = format
+    txtWarningAccepted = false
     dirty = false
     updateDocumentState()
     await fileApi.clearAutosave()
@@ -1079,9 +1123,97 @@ async function openRecentFile (filePath) {
   await loadFile(filePath)
 }
 
+// 来自“打开方式”、拖放或 macOS Finder 的文档
+async function openDocumentPath (filePath) {
+  if (!filePath) return false
+  if (!await canDiscardChanges()) return false
+  return loadFile(filePath)
+}
+
+// 外部打开：已有文档时新开独立窗口，空窗口时原地打开
+let openingExternal = false
+function openExternalDocument (filePath) {
+  if (!filePath || openingExternal) return
+  openingExternal = true
+  setTimeout(() => { openingExternal = false }, 1200)
+  if ((currentPath || dirty) && fileApi.openInNewWindow) {
+    showStatus('正在新窗口打开…')
+    Promise.resolve(fileApi.openInNewWindow(filePath))
+      .catch((error) => showStatus(`打开失败：${error.message}`, 0))
+    return
+  }
+  openDocumentPath(filePath)
+}
+
+/* ---------------- 拖放打开 ---------------- */
+
+const DRAG_DOCUMENT_PATTERN = /\.(docx|txt)$/i
+let dragDepth = 0
+
+function clearDragState () {
+  dragDepth = 0
+  document.body.classList.remove('file-drag-over')
+}
+
+function hasDraggedFiles (event) {
+  const types = event.dataTransfer?.types
+  return !!types && Array.prototype.includes.call(types, 'Files')
+}
+
+// 捕获阶段处理，避免编辑器或 Chromium 默认行为把文件当导航/下载
+document.addEventListener('dragenter', (event) => {
+  if (window.__TAURI__ || !hasDraggedFiles(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  dragDepth += 1
+  document.body.classList.add('file-drag-over')
+}, true)
+
+document.addEventListener('dragover', (event) => {
+  if (window.__TAURI__ || !hasDraggedFiles(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  event.dataTransfer.dropEffect = 'copy'
+}, true)
+
+document.addEventListener('dragleave', (event) => {
+  if (window.__TAURI__ || !hasDraggedFiles(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (!dragDepth) document.body.classList.remove('file-drag-over')
+}, true)
+
+document.addEventListener('drop', async (event) => {
+  if (window.__TAURI__ || !hasDraggedFiles(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  clearDragState()
+  if (document.querySelector('dialog[open]')) {
+    showStatus('请先关闭当前对话框再打开文档', 0)
+    return
+  }
+  const files = Array.from(event.dataTransfer?.files || [])
+  if (files.length !== 1) {
+    showStatus(files.length ? '一次只能打开一个文档' : '没有识别到文件', 0)
+    return
+  }
+  const filePath = fileApi.getPathForFile?.(files[0])
+  if (!filePath) {
+    showStatus('无法读取文件路径，请用“打开”按钮选择文件', 0)
+    return
+  }
+  if (!DRAG_DOCUMENT_PATTERN.test(filePath)) {
+    showStatus('仅支持拖入 .docx 或 .txt 文件', 0)
+    return
+  }
+  openExternalDocument(filePath)
+}, true)
+
 async function saveDocument (saveAs = false) {
   if (saveInProgress) return false
   saveInProgress = true
+  const savedDoc = editor.state.doc
   try {
     let filePath = currentPath
     if (saveAs || !filePath) {
@@ -1098,6 +1230,10 @@ async function saveDocument (saveAs = false) {
       format = 'docx'
     }
     const json = currentJSON()
+    if (format === 'txt' && !txtWarningAccepted && hasRichFormatting(json)) {
+      const proceed = await fileApi.confirmAction('保存为 .txt 会丢失格式、图片和表格，确定继续？')
+      if (!proceed) return false
+    }
     const data = format === 'txt'
       ? (json.content || []).map(plainBlock).join('\n')
       : await jsonToDocxBase64(json, pageSetup, settings)
@@ -1105,9 +1241,13 @@ async function saveDocument (saveAs = false) {
     currentPath = filePath
     currentFileName = fileNameFromPath(filePath)
     currentFormat = format
-    dirty = false
-    updateDocumentState()
-    await fileApi.clearAutosave().catch(() => {})
+    if (format === 'txt') txtWarningAccepted = true
+    // 保存期间用户继续输入时，新内容还没写进文件，不能标记为已保存
+    if (editor.state.doc.eq(savedDoc)) {
+      dirty = false
+      updateDocumentState()
+      await fileApi.clearAutosave().catch(() => {})
+    }
     addRecentFile(filePath)
     showStatus(`已保存 ${currentFileName}`)
     return true
@@ -1157,6 +1297,7 @@ async function restoreAutosave () {
     if (currentFormat !== savedFormat) currentFileName = currentFileName.replace(/\.[^.]+$/, '.docx')
     pageSetup = normalizePageSetup({ ...pageSetupFromSettings(), ...(payload.pageSetup || {}) })
     applyPageSetup()
+    txtWarningAccepted = false
     dirty = true
     updateDocumentState()
     showStatus('已恢复上次未保存的内容', 8000)
@@ -1264,13 +1405,311 @@ document.querySelector('#btnResetSettings').addEventListener('click', () => {
   populateSettingsForm(DEFAULT_SETTINGS)
 })
 
+const helpTabs = Array.from(document.querySelectorAll('.help-tab'))
+
+function showHelpTab (name) {
+  for (const tab of helpTabs) tab.classList.toggle('active', tab.dataset.helpTab === name)
+  document.querySelectorAll('.help-panel').forEach((panel) => {
+    panel.hidden = panel.id !== `help-panel-${name}`
+  })
+}
+
+for (const tab of helpTabs) {
+  tab.addEventListener('click', () => showHelpTab(tab.dataset.helpTab))
+}
+
 function openHelp () {
+  showHelpTab('shortcuts')
   if (!helpDialog.open) helpDialog.showModal()
 }
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '0.1.0'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.0.0'}`
+
+/* ---------------- 查找替换 ---------------- */
+
+const findBar = document.querySelector('#findBar')
+const findInput = document.querySelector('#findInput')
+const replaceInput = document.querySelector('#replaceInput')
+const replaceRow = document.querySelector('#replaceRow')
+const findCount = document.querySelector('#findCount')
+const btnFindCase = document.querySelector('#btnFindCase')
+
+// 单次查找最多收集这么多匹配，避免超大文档把界面拖慢；“全部替换”不受此限制
+const MAX_FIND_MATCHES = 1000
+
+let findMatches = []
+let findIndex = -1
+let findCaseSensitive = false
+let findCapped = false
+let findRefreshTimer = null
+
+// 把匹配到的字符下标换算成文档位置；段内的图片、换行等原子节点没有文字，会自然跳过
+function charPos (segments, index) {
+  let acc = 0
+  for (const segment of segments) {
+    const length = segment.end - segment.start
+    if (index < acc + length) return segment.start + (index - acc)
+    acc += length
+  }
+  return null
+}
+
+// 逐字符折叠大小写，保证折叠后的字符串和原文等长，下标可以一一对应
+function foldCase (text) {
+  let folded = ''
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    const lower = ch.toLowerCase()
+    folded += lower.length === ch.length ? lower : ch
+  }
+  return folded
+}
+
+// 按文本块收集匹配：同一段落里跨加粗/斜体等格式也能命中，但不会跨段落，
+// 也不会跨过硬换行/图片等非文本节点
+function collectFindMatches (query, caseSensitive, limit = MAX_FIND_MATCHES) {
+  const matches = []
+  let capped = false
+  if (!query) return { matches, capped }
+  const needle = caseSensitive ? query : foldCase(query)
+
+  editor.state.doc.descendants((node, pos) => {
+    if (capped) return false
+    if (!node.isTextblock) return true
+
+    let segments = []
+    let text = ''
+
+    const searchRun = () => {
+      if (!text || capped) return
+      const haystack = caseSensitive ? text : foldCase(text)
+      let at = haystack.indexOf(needle)
+      while (at !== -1) {
+        if (matches.length >= limit) {
+          capped = true
+          break
+        }
+        const from = charPos(segments, at)
+        const last = charPos(segments, at + needle.length - 1)
+        if (from != null && last != null) matches.push({ from, to: last + 1 })
+        at = haystack.indexOf(needle, at + Math.max(1, needle.length))
+      }
+      segments = []
+      text = ''
+    }
+
+    node.forEach((child, offset) => {
+      if (!child.isText) {
+        searchRun()
+        return
+      }
+      const start = pos + 1 + offset
+      segments.push({ start, end: start + child.text.length })
+      text += child.text
+    })
+    searchRun()
+    return false
+  })
+
+  return { matches, capped }
+}
+
+function positionFindBar () {
+  const bottom = document.querySelector('#ribbon').getBoundingClientRect().bottom
+  findBar.style.top = `${Math.round(bottom + 12)}px`
+}
+
+function renderFindDecorations () {
+  editor.view.dispatch(editor.state.tr.setMeta(findHighlightKey, {
+    ranges: findMatches,
+    active: findIndex
+  }))
+}
+
+function updateFindCount () {
+  const query = findInput.value
+  findInput.classList.toggle('no-result', !!query && !findMatches.length)
+  if (!query) {
+    findCount.textContent = ''
+    return
+  }
+  if (!findMatches.length) {
+    findCount.textContent = '无结果'
+    return
+  }
+  const total = findCapped ? `${findMatches.length}+` : String(findMatches.length)
+  findCount.textContent = `${findIndex + 1}/${total}`
+}
+
+function refreshFind ({ keepIndex = false, select = true } = {}) {
+  clearTimeout(findRefreshTimer)
+  findRefreshTimer = null
+
+  const query = findInput.value
+  const previous = keepIndex && findMatches[findIndex] ? findMatches[findIndex] : null
+  const result = collectFindMatches(query, findCaseSensitive)
+  findMatches = result.matches
+  findCapped = result.capped
+
+  if (!query || !findMatches.length) {
+    findIndex = -1
+  } else if (previous) {
+    const at = findMatches.findIndex((match) => match.from >= previous.from)
+    findIndex = at >= 0 ? at : findMatches.length - 1
+  } else {
+    const head = editor.state.selection.head
+    const at = findMatches.findIndex((match) => match.from >= head)
+    findIndex = at >= 0 ? at : 0
+  }
+
+  updateFindCount()
+  renderFindDecorations()
+  if (select && query && findIndex >= 0) selectFindMatch(findIndex)
+}
+
+function scheduleFindRefresh () {
+  clearTimeout(findRefreshTimer)
+  findRefreshTimer = setTimeout(() => {
+    findRefreshTimer = null
+    // 正在文档里编辑时只更新高亮，不把光标抢到匹配处
+    if (!findBar.hidden) refreshFind({ keepIndex: true, select: false })
+  }, 60)
+}
+
+function selectFindMatch (index) {
+  const match = findMatches[index]
+  if (!match) return
+  findIndex = index
+  editor.view.dispatch(editor.state.tr
+    .setSelection(TextSelection.create(editor.state.doc, match.from, match.to))
+    .scrollIntoView()
+    .setMeta(findHighlightKey, { ranges: findMatches, active: findIndex }))
+  updateFindCount()
+}
+
+function goToFind (delta) {
+  if (!findMatches.length) return
+  let next
+  if (findIndex < 0) next = delta > 0 ? 0 : findMatches.length - 1
+  else next = ((findIndex + delta) % findMatches.length + findMatches.length) % findMatches.length
+  selectFindMatch(next)
+}
+
+function openFind (mode = 'find') {
+  const wasHidden = findBar.hidden
+  // 先显示再刷新：即使 refreshFind 抛异常，查找栏也不会打不开
+  findBar.hidden = false
+  positionFindBar()
+  if (wasHidden) {
+    try {
+      const { from, to } = editor.state.selection
+      if (to > from) {
+        const selected = editor.state.doc.textBetween(from, to, '\n', ' ')
+        if (selected && !/[\r\n]/.test(selected) && selected.length <= 200) findInput.value = selected
+      }
+      refreshFind()
+    } catch (error) {
+      console.error(error)
+    }
+  }
+  if (mode === 'replace') {
+    replaceRow.hidden = false
+    replaceInput.focus()
+    replaceInput.select()
+  } else {
+    findInput.focus()
+    findInput.select()
+  }
+}
+
+function closeFind () {
+  if (findBar.hidden) return
+  findBar.hidden = true
+  replaceRow.hidden = true
+  clearTimeout(findRefreshTimer)
+  findRefreshTimer = null
+  findMatches = []
+  findIndex = -1
+  findCapped = false
+  editor.view.dispatch(editor.state.tr.setMeta(findHighlightKey, { ranges: [], active: -1 }))
+  editor.chain().focus().run()
+}
+
+// 替换文本继承被替换处开头的 marks；空文本直接删除
+function replaceMatch (tr, match, text) {
+  if (!text) {
+    tr.delete(match.from, match.to)
+    return
+  }
+  const marks = editor.state.doc.resolve(match.from).marks()
+  tr.replaceWith(match.from, match.to, editor.state.schema.text(text, marks))
+}
+
+function replaceCurrent () {
+  if (!findMatches.length || findIndex < 0) return
+  const match = findMatches[findIndex]
+  const text = replaceInput.value.replace(/[\r\n]+/g, ' ')
+  const tr = editor.state.tr.setStoredMarks(null)
+  replaceMatch(tr, match, text)
+  editor.view.dispatch(tr)
+  refreshFind({ keepIndex: true })
+  if (findMatches.length) {
+    const next = findMatches.findIndex((item) => item.from >= match.from + text.length)
+    selectFindMatch(next >= 0 ? next : 0)
+  }
+  showStatus('已替换 1 处')
+  replaceInput.focus()
+}
+
+function replaceAll () {
+  const query = findInput.value
+  if (!query) return
+  const { matches } = collectFindMatches(query, findCaseSensitive, Infinity)
+  if (!matches.length) return
+  const text = replaceInput.value.replace(/[\r\n]+/g, ' ')
+  const tr = editor.state.tr.setStoredMarks(null)
+  for (let i = matches.length - 1; i >= 0; i--) replaceMatch(tr, matches[i], text)
+  editor.view.dispatch(tr)
+  refreshFind()
+  showStatus(`已替换 ${matches.length} 处`)
+  replaceInput.focus()
+}
+
+document.querySelector('#btnFind').addEventListener('click', () => openFind('find'))
+document.querySelector('#btnReplace').addEventListener('click', () => openFind('replace'))
+document.querySelector('#btnFindPrev').addEventListener('click', () => goToFind(-1))
+document.querySelector('#btnFindNext').addEventListener('click', () => goToFind(1))
+document.querySelector('#btnFindClose').addEventListener('click', closeFind)
+document.querySelector('#btnReplaceOne').addEventListener('click', replaceCurrent)
+document.querySelector('#btnReplaceAll').addEventListener('click', replaceAll)
+
+btnFindCase.addEventListener('click', () => {
+  findCaseSensitive = !findCaseSensitive
+  btnFindCase.classList.toggle('active', findCaseSensitive)
+  refreshFind({ keepIndex: true })
+  findInput.focus()
+})
+
+findInput.addEventListener('input', () => refreshFind())
+findInput.addEventListener('keydown', (e) => {
+  if (e.isComposing || e.keyCode === 229) return
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    goToFind(e.shiftKey ? -1 : 1)
+  }
+})
+
+replaceInput.addEventListener('keydown', (e) => {
+  if (e.isComposing || e.keyCode === 229) return
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    replaceCurrent()
+  }
+})
+
+new ResizeObserver(positionFindBar).observe(document.querySelector('#ribbon'))
 
 /* ---------------- 打印预览与 PDF ---------------- */
 
@@ -1293,6 +1732,58 @@ function createPreviewPage () {
   return { page, body }
 }
 
+// 按内容实际高度分页：分页符强制换页，其余内容装不下就自动开新页
+function paginatePreview (clone, contentWidth, contentHeight) {
+  const measurer = document.createElement('div')
+  measurer.className = 'ProseMirror preview-content'
+  measurer.style.position = 'fixed'
+  measurer.style.left = '-100000px'
+  measurer.style.top = '0'
+  measurer.style.width = `${contentWidth}px`
+  measurer.style.minHeight = '0'
+  measurer.style.visibility = 'hidden'
+  measurer.style.pointerEvents = 'none'
+  document.body.appendChild(measurer)
+
+  const pages = []
+  let current = []
+  const flush = () => {
+    if (current.length) {
+      pages.push(current)
+      current = []
+      measurer.textContent = ''
+    }
+  }
+
+  for (const node of Array.from(clone.childNodes)) {
+    if (node.nodeType === 1 && node.matches('.page-break')) {
+      flush()
+      continue
+    }
+    measurer.appendChild(node)
+    if (measurer.getBoundingClientRect().height > contentHeight && current.length) {
+      // 当前页放不下这个块：把它挪到新的一页
+      measurer.removeChild(node)
+      pages.push(current)
+      current = []
+      measurer.textContent = ''
+      measurer.appendChild(node)
+    }
+    current.push(node)
+  }
+  flush()
+  measurer.remove()
+
+  const result = []
+  for (const nodes of pages.length ? pages : [[]]) {
+    const { page, body } = createPreviewPage()
+    for (const node of nodes) body.appendChild(node)
+    page.appendChild(body)
+    result.push(page)
+  }
+  return result
+}
+
 function renderPrintPreview () {
   const container = document.querySelector('#previewPages')
   container.innerHTML = ''
@@ -1302,20 +1793,18 @@ function renderPrintPreview () {
   clone.querySelectorAll('.ProseMirror-selectednode').forEach((el) => el.classList.remove('ProseMirror-selectednode'))
   clone.querySelectorAll('.ProseMirror-gapcursor').forEach((el) => el.remove())
   clone.querySelectorAll('.column-resize-handle').forEach((el) => el.remove())
+  clone.querySelectorAll('.is-editor-empty').forEach((el) => el.classList.remove('is-editor-empty'))
+  // 查找高亮不进入打印预览
+  clone.querySelectorAll('.find-match').forEach((el) => el.replaceWith(...el.childNodes))
 
-  let { page, body } = createPreviewPage()
-  const pages = [page]
-  for (const node of Array.from(clone.childNodes)) {
-    if (node.nodeType === 1 && node.matches('.page-break')) {
-      const next = createPreviewPage()
-      pages.push(next.page)
-      page = next.page
-      body = next.body
-      page.appendChild(body)
-      continue
-    }
-    body.appendChild(node.cloneNode(true))
-  }
+  const dims = pageDimensions()
+  const margin = currentMargins()
+  const pxPerCm = 37.7952756
+  const pages = paginatePreview(
+    clone,
+    (dims.width - margin.left - margin.right) * pxPerCm,
+    (dims.height - margin.top - margin.bottom) * pxPerCm - 2
+  )
   for (const [index, item] of pages.entries()) {
     const label = document.createElement('div')
     label.className = 'preview-label'
@@ -1324,23 +1813,35 @@ function renderPrintPreview () {
   }
   previewPages = pages.length
 
-  const dims = pageDimensions()
   const scroll = document.querySelector('#previewScroll')
   const available = Math.max(260, scroll.clientWidth - 36)
-  const zoom = Math.min(1, available / (dims.width * 37.7952756))
+  const zoom = Math.min(1, available / (dims.width * pxPerCm))
   for (const item of pages) item.style.zoom = String(zoom)
-  const margin = currentMargins()
   document.querySelector('#previewMeta').textContent =
-    `${pageSetup.size.toUpperCase()} · ${pageSetup.orientation === 'portrait' ? '纵向' : '横向'} · 页边距 ${margin.top}/${margin.right}/${margin.bottom}/${margin.left} cm · ${previewPages} 页（按分页符）`
+    `${pageSetup.size.toUpperCase()} · ${pageSetup.orientation === 'portrait' ? '纵向' : '横向'} · 页边距 ${margin.top}/${margin.right}/${margin.bottom}/${margin.left} cm · ${previewPages} 页（自动分页）`
 }
 
-function openPrintPreview () {
+document.querySelector('#previewPageSize').addEventListener('change', (e) => {
+  setPageSetup({ size: e.target.value })
   renderPrintPreview()
+})
+
+document.querySelector('#previewOrientation').addEventListener('change', (e) => {
+  setPageSetup({ orientation: e.target.value })
+  renderPrintPreview()
+})
+
+function openPrintPreview () {
+  if (!printPreviewDialog.open) printPreviewDialog.showModal()
+  renderPrintPreview()
+  document.querySelector('#previewPageSize').value = pageSetup.size
+  document.querySelector('#previewOrientation').value = pageSetup.orientation
   document.querySelector('#printPageRanges').value = ''
   document.querySelector('#printPageRanges').classList.remove('invalid')
   document.querySelector('#printCopies').value = '1'
   document.querySelector('#printRangeError').textContent = ''
-  if (!printPreviewDialog.open) printPreviewDialog.showModal()
+  // 对话框刚显示时容器宽度可能还没稳定，下一帧按真实宽度再排一次
+  requestAnimationFrame(renderPrintPreview)
 }
 
 document.querySelector('#btnPrint').addEventListener('click', openPrintPreview)
@@ -1395,8 +1896,30 @@ document.querySelector('#btnOpen').addEventListener('click', openDocument)
 document.querySelector('#btnSave').addEventListener('click', () => saveDocument())
 document.querySelector('#btnSaveAs').addEventListener('click', () => saveDocument(true))
 
+fileApi.onOpenFile((filePath) => { openExternalDocument(filePath) })
+
+let closePrompting = false
 fileApi.onSaveBeforeClose(async () => {
-  if (await saveDocument()) fileApi.closeAfterSave()
+  if (closePrompting) return
+  closePrompting = true
+  try {
+    if (!dirty) {
+      fileApi.closeAfterSave()
+      return
+    }
+    const choice = await fileApi.confirmSaveChanges()
+    if (choice === 'save') {
+      // 另存为被取消时窗口保持打开
+      if (await saveDocument()) fileApi.closeAfterSave()
+    } else if (choice === 'discard') {
+      await fileApi.clearAutosave().catch(() => {})
+      fileApi.closeAfterSave()
+    }
+  } catch (error) {
+    console.error(error)
+  } finally {
+    closePrompting = false
+  }
 })
 
 /* ---------------- 状态栏 ---------------- */
@@ -1415,4 +1938,21 @@ syncToolbar()
 updateDocumentState()
 applyPageSetup()
 scheduleAutoSave()
-restoreAutosave()
+// 自动备份恢复询问结束后再收“打开方式”的文档，避免两个对话框同时弹出
+async function finishStartup () {
+  await restoreAutosave()
+  // 主窗口负责把上次残留的 doc 自动保存逐个开窗，由各窗口自己提示恢复
+  if (window.wordlite.appInfo?.label === 'main' && fileApi.listOrphanAutosaves && fileApi.restoreOrphanAutosave) {
+    try {
+      const labels = await fileApi.listOrphanAutosaves()
+      for (const label of labels || []) {
+        await fileApi.restoreOrphanAutosave(label).catch(() => {})
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+  fileApi.notifyReady()
+}
+
+finishStartup()
