@@ -1073,7 +1073,7 @@ body.file-drag-over::after {
     background: transparent !important;
   }
   .paper {
-    width: 100% !important;
+    width: var(--print-content-width, 100%) !important;
     max-width: none !important;
     min-height: 0 !important;
     margin: 0;

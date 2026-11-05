@@ -954,6 +954,11 @@ function applyPageSetup () {
   paper.style.minHeight = `${dimensions.height}cm`
   paper.style.padding = `${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm`
   paper.style.setProperty('--paper', pageSetup.background)
+  // WKWebView 的打印布局会对 width:100% 自动缩放；用预览同一正文宽度
+  // 固定 CSS 像素到纸张的比例，避免字体、行高和段距被一起放大。
+  if (isMac) {
+    paper.style.setProperty('--print-content-width', `${dimensions.width - margins.left - margins.right}cm`)
+  }
   // 打印时页面背景色要铺满整张纸，根元素也同步一份
   document.documentElement.style.setProperty('--paper', pageSetup.background)
   paper.style.setProperty('--margin-top', `${margins.top}cm`)
