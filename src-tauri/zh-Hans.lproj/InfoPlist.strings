@@ -1,0 +1,3 @@
+/* 中文系统下菜单栏和程序坞显示「简写」，安装包文件名仍是 WordLite.app */
+"CFBundleName" = "简写";
+"CFBundleDisplayName" = "简写";

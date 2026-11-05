@@ -18,12 +18,26 @@ struct WindowDocState {
     pending_open: Option<String>,
 }
 
+// macOS 专属的运行时状态：菜单退出流程、访达打开文件的启动期排队
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct MacState {
+    // 主窗口渲染层是否已经就绪（决定访达打开的文件是排队还是开新窗口）
+    main_ready: std::sync::atomic::AtomicBool,
+    // ⌘Q 触发的退出流程进行中
+    quitting: std::sync::atomic::AtomicBool,
+    // 退出时要依次关闭的窗口 label
+    quit_queue: Mutex<Vec<String>>,
+}
+
 #[derive(Default)]
 struct AppState {
     windows: Mutex<HashMap<String, WindowDocState>>,
     // 防止同一次拖放/重复事件在短时间内开出一串窗口
     recent_external: Mutex<HashMap<String, std::time::Instant>>,
     selftest_script: Mutex<Option<String>>,
+    #[cfg(target_os = "macos")]
+    mac: MacState,
 }
 
 impl AppState {
@@ -121,25 +135,47 @@ fn create_recovery_window(app: &tauri::AppHandle, source: &Path) -> Result<(), S
     build_document_window(app, &label, None).map(|_| ())
 }
 
+// 只接管的扩展名：其它文件不抢（访达/命令行都会走这里）
+fn supported_document_path(path: &Path) -> Option<String> {
+    if !path.is_file() {
+        return None;
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    if matches!(extension.as_deref(), Some("docx") | Some("txt")) {
+        return Some(path.to_string_lossy().to_string());
+    }
+    None
+}
+
 // 从命令行参数里找要打开的文档（资源管理器“打开方式”/双击关联文件）
+// 以 - 开头的参数全部跳过：macOS 启动时会带 -psn_0_12345 这类参数
 fn document_path_from_args<I: IntoIterator<Item = String>>(args: I) -> Option<String> {
     for arg in args {
         if arg.starts_with('-') {
             continue;
         }
-        let path = PathBuf::from(&arg);
-        if !path.is_file() {
-            continue;
-        }
-        let extension = path
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| value.to_ascii_lowercase());
-        if matches!(extension.as_deref(), Some("docx") | Some("txt")) {
-            return Some(arg);
+        if let Some(path) = supported_document_path(Path::new(&arg)) {
+            return Some(path);
         }
     }
     None
+}
+
+// 同一个路径 1.5 秒内只处理一次：拖放、右键“打开方式”、访达双击、argv 可能重复触发
+fn take_external_path(state: &AppState, path: &str) -> bool {
+    let now = std::time::Instant::now();
+    let mut recent = state.recent_external.lock().unwrap();
+    if let Some(last) = recent.get(path) {
+        if now.duration_since(*last) < std::time::Duration::from_millis(1500) {
+            return false;
+        }
+    }
+    recent.insert(path.to_string(), now);
+    recent.retain(|_, at| now.duration_since(*at) < std::time::Duration::from_secs(30));
+    true
 }
 
 #[derive(Deserialize)]
@@ -414,19 +450,36 @@ async fn confirm_save_changes(window: tauri::WebviewWindow) -> Result<String, St
 // 拖入/右键“打开方式”的入口：新建独立窗口
 #[tauri::command(rename_all = "camelCase")]
 async fn open_external(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    let now = std::time::Instant::now();
     let state = app.state::<AppState>();
-    {
-        let mut recent = state.recent_external.lock().unwrap();
-        if let Some(last) = recent.get(&path) {
-            if now.duration_since(*last) < std::time::Duration::from_millis(1500) {
-                return Ok(());
-            }
-        }
-        recent.insert(path.clone(), now);
-        recent.retain(|_, at| now.duration_since(*at) < std::time::Duration::from_secs(30));
+    if !take_external_path(&state, &path) {
+        return Ok(());
     }
     create_document_window(&app, Some(path)).map(|_| ())
+}
+
+// 访达双击 / 拖到 Dock 图标：启动阶段先排进主窗口的 pending_open，之后一律新开窗口
+#[cfg(target_os = "macos")]
+fn open_document_from_system(app: &tauri::AppHandle, path: String) {
+    let state = app.state::<AppState>();
+    if !take_external_path(&state, &path) {
+        return;
+    }
+    let startup = !state.mac.main_ready.load(Ordering::SeqCst)
+        && app.get_webview_window("main").is_some();
+    if startup {
+        let queued = state.update("main", |doc| {
+            if doc.pending_open.is_none() {
+                doc.pending_open = Some(path.clone());
+                true
+            } else {
+                false
+            }
+        });
+        if queued {
+            return;
+        }
+    }
+    let _ = create_document_window(app, Some(path));
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -445,6 +498,11 @@ fn set_document_state(
 #[tauri::command]
 fn renderer_ready(window: tauri::WebviewWindow, state: State<AppState>) -> Result<(), String> {
     let label = window.label().to_string();
+    // 主窗口的渲染层到此可用：之后从访达打开的文件直接开新窗口，不再排队
+    #[cfg(target_os = "macos")]
+    if label == "main" {
+        state.mac.main_ready.store(true, Ordering::SeqCst);
+    }
     let pending = state.update(&label, |doc| doc.pending_open.take());
     if let Some(path) = pending {
         window
@@ -458,6 +516,18 @@ fn renderer_ready(window: tauri::WebviewWindow, state: State<AppState>) -> Resul
     Ok(())
 }
 
+// 关闭流程被渲染层取消（三选一里选了“取消”）。Windows 上没有退出流程，什么也不做。
+#[tauri::command]
+fn close_cancelled(state: State<AppState>) {
+    #[cfg(target_os = "macos")]
+    {
+        state.mac.quitting.store(false, Ordering::SeqCst);
+        state.mac.quit_queue.lock().unwrap().clear();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = &state;
+}
+
 #[tauri::command]
 fn close_after_save(window: tauri::WebviewWindow, state: State<AppState>) -> Result<(), String> {
     let label = window.label().to_string();
@@ -465,11 +535,18 @@ fn close_after_save(window: tauri::WebviewWindow, state: State<AppState>) -> Res
     window.close().map_err(|e| e.to_string())
 }
 
-// 打印先走 WebView 自带的打印对话框；页码/份数交给系统打印面板
+// 打印走系统打印面板；macOS 用 WKWebView 自带的打印（eval window.print() 在 WKWebView 里不弹面板）
 #[tauri::command(rename_all = "camelCase")]
 fn print_document(window: tauri::WebviewWindow, options: serde_json::Value) -> Result<(), String> {
     let _ = options;
-    window.eval("window.print()").map_err(|e| e.to_string())
+    #[cfg(target_os = "macos")]
+    {
+        window.print().map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.eval("window.print()").map_err(|e| e.to_string())
+    }
 }
 
 #[derive(Deserialize)]
@@ -665,9 +742,240 @@ fn selftest_report(app: tauri::AppHandle, results: serde_json::Value) {
     }
 }
 
+// ---- 菜单命令 ----
+
+// 菜单项统一发 menu-command 给当前窗口，由渲染层分发到已有函数
+fn menu_target_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
+    if let Some(window) = app
+        .webview_windows()
+        .into_values()
+        .find(|window| window.is_focused().unwrap_or(false))
+    {
+        return Some(window);
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        return Some(window);
+    }
+    let mut windows: Vec<tauri::WebviewWindow> = app.webview_windows().into_values().collect();
+    windows.sort_by(|a, b| a.label().cmp(b.label()));
+    windows.into_iter().next()
+}
+
+fn emit_menu_command(app: &tauri::AppHandle, id: &str) {
+    let Some(window) = menu_target_window(app) else {
+        return;
+    };
+    let _ = window.emit_to(
+        EventTarget::webview_window(window.label()),
+        "menu-command",
+        id.to_string(),
+    );
+}
+
+fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
+    #[cfg(target_os = "macos")]
+    if id == "quit" {
+        begin_quit(app);
+        return;
+    }
+    // 没有任何窗口时，新建和打开都只是开一个空窗口
+    if matches!(id, "new" | "open") && app.webview_windows().is_empty() {
+        let _ = create_document_window(app, None);
+        return;
+    }
+    // 系统自带项（关于/服务/隐藏/剪切/复制/粘贴/全选/最小化…）由 AppKit 自己处理，
+    // 只把约定里的 id 转发给渲染层
+    const COMMAND_IDS: [&str; 12] = [
+        "new",
+        "open",
+        "save",
+        "saveAs",
+        "exportPdf",
+        "print",
+        "printPreview",
+        "undo",
+        "redo",
+        "find",
+        "replace",
+        "help",
+    ];
+    if !COMMAND_IDS.contains(&id) {
+        return;
+    }
+    emit_menu_command(app, id);
+}
+
+// ---- macOS 菜单栏（Windows 不建菜单，行为保持原样） ----
+#[cfg(target_os = "macos")]
+fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    // 自定义项：点击后把 id 发给当前窗口。
+    // 撤销/重做必须是自定义项，用系统 undo: 会绕过 TipTap 自己的历史记录。
+    fn custom(
+        app: &tauri::AppHandle,
+        id: &str,
+        text: &str,
+        accelerator: Option<&str>,
+    ) -> tauri::Result<tauri::menu::MenuItem<tauri::Wry>> {
+        let mut builder = MenuItemBuilder::with_id(id, text);
+        if let Some(accelerator) = accelerator {
+            builder = builder.accelerator(accelerator);
+        }
+        builder.build(app)
+    }
+
+    let app_menu = SubmenuBuilder::new(app, "简写")
+        .about_with_text("关于简写", None)
+        .separator()
+        .services_with_text("服务")
+        .separator()
+        .hide_with_text("隐藏简写")
+        .hide_others_with_text("隐藏其他")
+        .show_all_with_text("全部显示")
+        .separator()
+        .item(&custom(app, "quit", "退出简写", Some("CmdOrCtrl+Q"))?)
+        .build()?;
+
+    let file_menu = SubmenuBuilder::new(app, "文件")
+        .item(&custom(app, "new", "新建", Some("CmdOrCtrl+N"))?)
+        .item(&custom(app, "open", "打开…", Some("CmdOrCtrl+O"))?)
+        .close_window_with_text("关闭窗口")
+        .separator()
+        .item(&custom(app, "save", "保存", Some("CmdOrCtrl+S"))?)
+        .item(&custom(app, "saveAs", "另存为…", Some("CmdOrCtrl+Shift+S"))?)
+        .separator()
+        .item(&custom(app, "exportPdf", "导出 PDF…", None)?)
+        .separator()
+        .item(&custom(app, "print", "打印…", Some("CmdOrCtrl+P"))?)
+        .item(&custom(app, "printPreview", "打印预览", None)?)
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "编辑")
+        .item(&custom(app, "undo", "撤销", Some("CmdOrCtrl+Z"))?)
+        .item(&custom(app, "redo", "重做", Some("CmdOrCtrl+Shift+Z"))?)
+        .separator()
+        .cut_with_text("剪切")
+        .copy_with_text("复制")
+        .paste_with_text("粘贴")
+        .select_all_with_text("全选")
+        .separator()
+        .item(&custom(app, "find", "查找…", Some("CmdOrCtrl+F"))?)
+        .item(&custom(app, "replace", "替换…", Some("CmdOrCtrl+Alt+F"))?)
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "窗口")
+        .minimize_with_text("最小化")
+        .maximize_with_text("缩放")
+        .fullscreen_with_text("全屏")
+        .build()?;
+
+    let help_menu = SubmenuBuilder::new(app, "帮助")
+        .item(&custom(app, "help", "简写帮助", Some("CmdOrCtrl+Shift+/"))?)
+        .build()?;
+
+    // 交给 AppKit 当标准的“窗口”“帮助”菜单（补窗口列表、帮助搜索）
+    window_menu.set_as_windows_menu_for_nsapp()?;
+    help_menu.set_as_help_menu_for_nsapp()?;
+
+    MenuBuilder::new(app)
+        .items(&[
+            &app_menu,
+            &file_menu,
+            &edit_menu,
+            &window_menu,
+            &help_menu,
+        ])
+        .build()
+}
+
+#[cfg(target_os = "macos")]
+fn setup_macos_menu(app: &mut tauri::App) -> tauri::Result<()> {
+    let menu = build_app_menu(app.handle())?;
+    app.set_menu(menu)?;
+    Ok(())
+}
+
+// ⌘Q：先标成退出中，再按窗口顺序一个个走现有的 CloseRequested 保存流程
+#[cfg(target_os = "macos")]
+fn begin_quit(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let mut queue: Vec<String> = app.webview_windows().keys().cloned().collect();
+    if queue.is_empty() {
+        app.exit(0);
+        return;
+    }
+    queue.sort();
+    state.mac.quitting.store(true, Ordering::SeqCst);
+    *state.mac.quit_queue.lock().unwrap() = queue;
+    close_next_for_quit(app);
+}
+
+// 关掉队列里的下一个窗口；队列空了并且一个窗口都不剩才真正退出
+#[cfg(target_os = "macos")]
+fn close_next_for_quit(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    loop {
+        let next = {
+            let mut queue = state.mac.quit_queue.lock().unwrap();
+            if queue.is_empty() {
+                None
+            } else {
+                Some(queue.remove(0))
+            }
+        };
+        let Some(label) = next else {
+            if app.webview_windows().is_empty() {
+                app.exit(0);
+            }
+            return;
+        };
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+            return;
+        }
+    }
+}
+
+// 事件循环回调：关掉最后一个窗口不退出程序（D5），点 Dock 图标再开一个新窗口
+#[cfg(target_os = "macos")]
+fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    match event {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
+            let quitting = app.state::<AppState>().mac.quitting.load(Ordering::SeqCst);
+            if code.is_none() && !quitting {
+                api.prevent_exit();
+            }
+        }
+        tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            if !has_visible_windows {
+                let _ = create_document_window(app, None);
+            }
+        }
+        // 访达双击 / 拖到 Dock 图标 / “打开方式”
+        tauri::RunEvent::Opened { urls } => {
+            for url in urls {
+                let Ok(path) = url.to_file_path() else {
+                    continue;
+                };
+                if let Some(path) = supported_document_path(&path) {
+                    open_document_from_system(app, path);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn handle_run_event(_app: &tauri::AppHandle, _event: tauri::RunEvent) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // 单实例必须第一个注册：第二次启动（右键打开/双击文件）时新建独立窗口
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // 窗口回调里同步建 WebView 在 Windows 上可能死锁，放到异步线程里做
@@ -809,8 +1117,13 @@ pub fn run() {
                     handle.exit(2);
                 });
             }
+            #[cfg(target_os = "macos")]
+            if let Err(error) = setup_macos_menu(app) {
+                eprintln!("创建菜单失败：{error}");
+            }
             Ok(())
         })
+        .on_menu_event(|app, event| handle_menu_event(app, event.id().0.as_str()))
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 let _ = webview.eval(
@@ -833,6 +1146,7 @@ pub fn run() {
             open_external,
             set_document_state,
             renderer_ready,
+            close_cancelled,
             close_after_save,
             print_document,
             print_to_pdf,
@@ -855,13 +1169,24 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::Destroyed => {
-                window.state::<AppState>().remove(window.label());
+                let state = window.state::<AppState>();
+                state.remove(window.label());
+                // 退出流程里：关掉一个再关下一个，最后一个关完才真正退出
+                #[cfg(target_os = "macos")]
+                if state.mac.quitting.load(Ordering::SeqCst) {
+                    let handle = window.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        close_next_for_quit(&handle);
+                    });
+                }
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .unwrap_or_else(|error| {
             report_startup_error(&error.to_string());
             std::process::exit(1);
         });
+
+    app.run(|app_handle, event| handle_run_event(app_handle, event));
 }

@@ -1,0 +1,24 @@
+{
+  "bundle": {
+    "category": "Productivity",
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-",
+      "files": {
+        "Resources/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings"
+      }
+    },
+    "fileAssociations": [
+      {
+        "ext": ["docx"],
+        "name": "Word 文档",
+        "role": "Editor"
+      },
+      {
+        "ext": ["txt"],
+        "name": "纯文本文档",
+        "role": "Editor"
+      }
+    ]
+  }
+}
