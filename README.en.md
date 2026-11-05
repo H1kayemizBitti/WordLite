@@ -188,6 +188,7 @@ docs/                   README screenshot and migration notes
 - The macOS build is ad-hoc signed and not notarized, so the first launch needs the steps under "Download"; the Windows build is not code-signed either
 - Print preview paginates by content blocks; a single extremely long paragraph without breaks is not split by line in the preview (the PDF / print engine still paginates by line)
 - Text boxes, nested tables and complex fields are simplified on DOCX import
+- DOCX import restores only direct run formatting: `w:color` text colour, `w:highlight` highlighter and run-level `w:shd` character shading. Theme colours use the cached value in `w:color/@w:val` (a theme colour with no cached value is not restored); colours defined in character or paragraph styles and paragraph shading are not restored. When a run cannot be aligned with confidence it is left uncoloured, so colour never lands on the wrong characters
 - Image text wrapping supports left and right only
 
 ## FAQ

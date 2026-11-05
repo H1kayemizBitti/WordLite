@@ -317,19 +317,253 @@ function applyTableStyles (json, xml) {
   })
 }
 
+// Word 内置高亮色板：w:highlight/@w:val → CSS 十六进制
+const RUN_HIGHLIGHT_COLORS = {
+  black: '#000000',
+  blue: '#0000ff',
+  cyan: '#00ffff',
+  green: '#00ff00',
+  magenta: '#ff00ff',
+  red: '#ff0000',
+  white: '#ffffff',
+  yellow: '#ffff00',
+  darkblue: '#000080',
+  darkcyan: '#008080',
+  darkgreen: '#008000',
+  darkmagenta: '#800080',
+  darkred: '#800000',
+  darkyellow: '#808000',
+  darkgray: '#808080',
+  lightgray: '#c0c0c0'
+}
+
+// 和 mammoth 的忽略表对齐：这些子树里的文字不会出现在正文 HTML 里，比对时跳过
+const RUN_TEXT_SKIP = new Set([
+  'w:pPr',
+  'w:rPr',
+  'w:del',
+  'w:moveFrom',
+  'w:sectPr',
+  'w:instrText',
+  'w:fldChar',
+  'w:tblPr',
+  'w:tblGrid',
+  'w:trPr',
+  'w:tcPr',
+  'w:pict',
+  'w:object',
+  'w:bookmarkStart',
+  'w:bookmarkEnd',
+  'w:commentRangeStart',
+  'w:commentRangeEnd',
+  'w:proofErr',
+  'w:lastRenderedPageBreak',
+  'w:footnoteRef',
+  'w:endnoteRef',
+  'w:annotationRef'
+])
+
+// mammoth 会把这几类元素换成别的字符（符号、脚注角标），正文文字对不上，整段不染
+const RUN_TEXT_REWRITE = new Set(['w:sym', 'w:footnoteReference', 'w:endnoteReference'])
+
+function inlineRunStyle (properties) {
+  if (!properties) return null
+  let color = null
+  const colorValue = directChild(properties, 'w:color')?.getAttribute('w:val')
+  if (/^[0-9a-f]{6}$/i.test(colorValue || '')) color = `#${colorValue.toLowerCase()}`
+  let highlight = null
+  const highlightValue = directChild(properties, 'w:highlight')?.getAttribute('w:val')
+  if (highlightValue && !['none', 'nil'].includes(highlightValue.toLowerCase())) {
+    highlight = RUN_HIGHLIGHT_COLORS[highlightValue.toLowerCase()] || null
+  }
+  if (!highlight) {
+    const shading = directChild(properties, 'w:shd')
+    const fill = shading?.getAttribute('w:fill')
+    if (/^[0-9a-f]{6}$/i.test(fill || '') && !/^ffffff$/i.test(fill) && shading?.getAttribute('w:val') !== 'nil') {
+      highlight = `#${fill.toLowerCase()}`
+    }
+  }
+  return color || highlight ? { color, highlight } : null
+}
+
+function styleForTextNode (node) {
+  let current = node.parentNode
+  while (current) {
+    if (current.nodeName === 'w:r') return inlineRunStyle(directChild(current, 'w:rPr'))
+    if (current.nodeName === 'w:p') return null
+    current = current.parentNode
+  }
+  return null
+}
+
+// 按文档顺序把每个段落拆成"文字段 + 字符样式"，段落文字必须和 mammoth 产出的完全一致才采用
+function paragraphRunSegments (xml) {
+  const paragraphs = []
+  for (const paragraph of Array.from(xml.getElementsByTagName('w:p'))) {
+    const segments = []
+    let rewritten = false
+    const walk = (element) => {
+      for (const child of Array.from(element.children || [])) {
+        const name = child.nodeName
+        if (RUN_TEXT_SKIP.has(name)) continue
+        if (name === 'w:t') segments.push({ text: child.textContent || '', style: styleForTextNode(child) })
+        else if (name === 'w:tab') segments.push({ text: '\t', style: styleForTextNode(child) })
+        else if (name === 'w:noBreakHyphen') segments.push({ text: '\u2011', style: styleForTextNode(child) })
+        else if (name === 'w:softHyphen') segments.push({ text: '\u00AD', style: styleForTextNode(child) })
+        else if (RUN_TEXT_REWRITE.has(name)) rewritten = true
+        else walk(child)
+      }
+    }
+    walk(paragraph)
+    if (rewritten || !segments.length) continue
+    const text = segments.map((segment) => segment.text).join('')
+    if (!text) continue
+    paragraphs.push({ text, segments })
+  }
+  return paragraphs
+}
+
+function styleAtOffset (ranges, offset) {
+  let low = 0
+  let high = ranges.length - 1
+  while (low <= high) {
+    const middle = (low + high) >> 1
+    const range = ranges[middle]
+    if (offset < range.start) high = middle - 1
+    else if (offset >= range.end) low = middle + 1
+    else return range
+  }
+  return null
+}
+
+function wrapSegments (block, segments) {
+  const ranges = []
+  let offset = 0
+  for (const segment of segments) {
+    const start = offset
+    offset += segment.text.length
+    if (!segment.style) continue
+    ranges.push({ start, end: offset, color: segment.style.color, highlight: segment.style.highlight })
+  }
+  if (!ranges.length) return
+  const textNodes = []
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+  while (walker.nextNode()) textNodes.push(walker.currentNode)
+  let position = 0
+  for (const textNode of textNodes) {
+    const text = textNode.nodeValue || ''
+    const start = position
+    position += text.length
+    if (!text) continue
+    const pieces = []
+    for (let index = 0; index < text.length; index++) {
+      const style = styleAtOffset(ranges, start + index)
+      const key = style ? `${style.color || '-'}|${style.highlight || '-'}` : ''
+      const last = pieces[pieces.length - 1]
+      if (last && last.key === key) last.text += text[index]
+      else pieces.push({ key, text: text[index], style })
+    }
+    if (pieces.length === 1 && !pieces[0].key) continue
+    const fragment = document.createDocumentFragment()
+    for (const piece of pieces) {
+      if (!piece.key) {
+        fragment.append(document.createTextNode(piece.text))
+        continue
+      }
+      let element = document.createTextNode(piece.text)
+      if (piece.style.highlight) {
+        const mark = document.createElement('mark')
+        mark.setAttribute('data-color', piece.style.highlight)
+        mark.append(element)
+        element = mark
+      }
+      if (piece.style.color) {
+        const span = document.createElement('span')
+        span.style.color = piece.style.color
+        span.append(element)
+        element = span
+      }
+      fragment.append(element)
+    }
+    textNode.replaceWith(fragment)
+  }
+}
+
+function firstAtLeast (values, target) {
+  let low = 0
+  let high = values.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (values[middle] < target) low = middle + 1
+    else high = middle
+  }
+  return low < values.length ? values[low] : undefined
+}
+
+// mammoth 不读 w:color / w:highlight / w:shd，这里按段落文字逐字对齐，把颜色补回 HTML。
+// 对齐不上（段落文字和 mammoth 产出不一致）就整段放弃，宁可不染也不能染错字。
+function injectRunStyles (html, xml) {
+  const paragraphs = paragraphRunSegments(xml)
+  if (!paragraphs.length) return html
+  const byText = new Map()
+  paragraphs.forEach((paragraph, position) => {
+    if (!byText.has(paragraph.text)) byText.set(paragraph.text, [])
+    byText.get(paragraph.text).push(position)
+  })
+  const container = document.createElement('div')
+  container.innerHTML = html
+  const candidates = Array.from(container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li'))
+  const blockSet = new Set(candidates)
+  const blocks = candidates.filter((block) => {
+    let parent = block.parentElement
+    while (parent && parent !== container) {
+      if (blockSet.has(parent)) return false
+      parent = parent.parentElement
+    }
+    return true
+  })
+  let cursor = 0
+  for (const block of blocks) {
+    const text = block.textContent
+    const positions = text ? byText.get(text) : undefined
+    if (!positions) continue
+    const position = firstAtLeast(positions, cursor)
+    if (position === undefined) continue
+    cursor = position + 1
+    wrapSegments(block, paragraphs[position].segments)
+  }
+  return container.innerHTML
+}
+
+// 浏览器会把内联的 #ff0000 归一成 rgb(255, 0, 0)，这里统一回 #rrggbb，
+// 和工具栏设色、导出、自动保存里的颜色写法保持一致
+function normalizeRunColors (json) {
+  walkJson(json, (node) => {
+    if (!node.marks?.length) return
+    node.marks = node.marks.map((mark) => {
+      if (mark.type !== 'textStyle' || !mark.attrs?.color) return mark
+      const color = normalizeHexColor(mark.attrs.color)
+      return color ? { ...mark, attrs: { ...mark.attrs, color } } : mark
+    })
+  })
+}
+
 export async function docxBase64ToJSON (base64, extensions) {
   const zip = await JSZip.loadAsync(base64ToBytes(base64))
   const file = zip.file('word/document.xml')
   const xml = file ? await file.async('string') : ''
+  let marked = ''
   if (file) {
-    const marked = xml
+    marked = xml
       .replace(/<w:br\b(?=[^>]*\bw:type="page")[^>]*\/>/g, `<w:t>${PAGE_BREAK_MARKER}</w:t>`)
       .replace(/<w:br\b(?=[^>]*\bw:type="page")[^>]*><\/w:br>/g, `<w:t>${PAGE_BREAK_MARKER}</w:t>`)
     zip.file('word/document.xml', marked)
   }
   const converted = await zip.generateAsync({ type: 'uint8array' })
   const result = await mammoth.convertToHtml({ arrayBuffer: converted.buffer })
-  const json = generateJSON(result.value, extensions)
+  const html = marked ? injectRunStyles(result.value, new DOMParser().parseFromString(marked, 'application/xml')) : result.value
+  const json = generateJSON(html, extensions)
+  normalizeRunColors(json)
   if (xml) {
     const xmlDocument = new DOMParser().parseFromString(xml, 'application/xml')
     applyParagraphStyles(json, xmlDocument)
