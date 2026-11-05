@@ -1,7 +1,7 @@
 {
   "name": "wordlite",
   "productName": "简写",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "离线、轻量的桌面写字板：DOCX 编辑、打印与 PDF 导出",
   "license": "MIT",

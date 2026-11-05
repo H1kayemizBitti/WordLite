@@ -2,6 +2,41 @@
 
 简写 WordLite 项目从 v0.1.0 的 Electron 版本起步，v1.0.0 是迁移到 Tauri 2 后的第一个正式版本。
 
+## v1.0.1（2026-11-05）
+
+macOS 版正式可用。发行时 Windows 安装包（NSIS）和 macOS 安装包（Universal dmg）放在同一个 Release 里。Windows 版的行为和 DOCX 格式没有变化，可以直接覆盖安装。
+
+### 新功能
+
+- **macOS 版**：Universal dmg，同一个包同时支持 Apple 芯片和 Intel，要求 macOS 13 Ventura 或更新版本。菜单栏、⌘ 快捷键、访达双击 / 拖放打开、多窗口、自动保存与崩溃恢复都和 Windows 版一致。
+- **Mac 菜单栏**：简写 / 文件 / 编辑 / 窗口 / 帮助五个菜单；撤销、重做走编辑器自己的历史记录，菜单和 ⌘Z 效果一致；⌘Q 退出时逐个窗口询问是否保存。
+- **Mac 打印与 PDF**：「打印」走系统打印面板；「导出 PDF」用 `NSPrintOperation` 直接落盘，不弹面板。导出到已存在的文件时先写同目录临时文件 `<目标>.wltmp.pdf`，确认写完再原子替换，覆盖失败不会破坏旧文件。
+- **Mac 字体回退**：宋体、黑体、楷体、仿宋、等线、Consolas 在 Mac 上分别回退到 Songti SC、Heiti SC、Kaiti SC、STFangsong、PingFang SC、Menlo；导入的 DOCX 只写一个字体名也能正常显示。
+
+### 改进
+
+- **⌘ 键位**：Mac 上 Ctrl 一律换成 ⌘，Ctrl 组合键交还系统（Ctrl+A / E / K 仍是行首 / 行尾 / 删到行尾）。三处和系统冲突的键位改掉：替换 ⌘H → ⌥⌘F、缩进 ⌘M / ⇧⌘M → ⌘] / ⌘[、帮助 F1 → ⌘?（F1 仍可用）。
+- **Dock 行为**：关掉最后一个窗口不退出程序；点 Dock 图标优先把已最小化或隐藏的窗口调出来，一个窗口都没有时才新建。
+- **退出流程**：⌘Q 逐窗询问，在任一窗口选「取消」就不会退出；另存为被取消、写盘失败也不会留下残余的退出状态。
+- 老用户存在本地的字体设置在新版字体栈变化后不会被重置。
+
+### 修复
+
+- 修复 Mac 上 PDF 比打印预览多 1 页的问题：WKWebView 打印时把纸宽按屏幕宽度缩放了约 7%，打印模式下改为按「纸宽减左右页边距」排版。实测 18 页对 18 页、每页 35 段。
+- 修复 Mac 上导出 PDF 覆盖已有文件时可能提前报「已导出」的问题（改为临时文件 + 文件尾 `%%EOF` 双重判定）。
+- 修复多页 PDF 写到一半停顿被误判成写完的问题。
+
+### 内部与构建
+
+- GitHub Actions 增加 macOS job：Universal 构建、`--selftest --long-print`、上传 dmg 和自测 PDF，并用 `REQUIRE_PDF=1` 校验 PDF 页数与预览一致；推送 `v*` 标签时自动建一个同时含 Windows 和 macOS 安装包的草稿 Release。
+- macOS 打包配置单独放在 `src-tauri/tauri.macos.conf.json`：最低系统 13.0、ad-hoc 签名、docx / txt 文件关联、`zh-Hans.lproj` 让菜单栏和程序坞显示「简写」。
+- `docs/TAURI-MIGRATION.md` 的阶段 3（macOS）标记为完成，并更新已知风险。
+
+### 已知限制
+
+- 从 Dock 图标右键「退出」、注销或关机时不会弹保存提示，程序直接退出；未保存的内容靠自动保存恢复。
+- macOS 包是 ad-hoc 签名，没有 Apple 公证，首次打开要按 README 的步骤放行。
+
 ## v1.0.0（2026-11-04）
 
 第一个 Tauri 正式版。桌面外壳从 Electron 迁移到 Tauri 2 + 系统 WebView2，安装包从 150MB左右 降到约 3MB；同时补齐查找替换、打印预览自动分页、多窗口和帮助中心，并集中修复了一批数据安全与 DOCX 兼容问题。

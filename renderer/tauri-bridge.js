@@ -73,7 +73,7 @@
   window.wordlite = {
     appInfo: {
       name: '简写',
-      version: '1.0.0',
+      version: '1.0.1',
       label: currentWindow?.label || 'main'
     },
     // 渲染层用它决定快捷键和文案：'mac' 或 'win'
