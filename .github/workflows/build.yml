@@ -34,14 +34,33 @@ jobs:
         run: npx tauri build --bundles nsis
       - name: 自测
         # 用 cmd 直接重定向：PowerShell 管道会把 stdout 转成 UTF-16 并改写退出码
+        # 跑三次：默认长文档 / 纯中文长文档样本 / 中英数字混排样本
         shell: cmd
+        env:
+          # 自测 PDF 落盘到 std::env::temp_dir()：Windows 读 TEMP/TMP，统一指向 runner.temp，
+          # 下面的 PDF 上传路径才对得上；TMPDIR 兼容显式读取该变量的实现。
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TMPDIR: ${{ runner.temp }}
         run: |
           src-tauri\target\release\wordlite.exe --selftest --long-print > selftest-windows.log 2>&1
           if errorlevel 1 exit /b %errorlevel%
+          src-tauri\target\release\wordlite.exe --selftest --long-print-file "${{ github.workspace }}/tools/fixtures/long-cjk.txt" > selftest-windows-cjk.log 2>&1
+          if errorlevel 1 exit /b %errorlevel%
+          src-tauri\target\release\wordlite.exe --selftest --long-print-file "${{ github.workspace }}/tools/fixtures/long-mixed.txt" > selftest-windows-mixed.log 2>&1
+          if errorlevel 1 exit /b %errorlevel%
       - name: 校验自测结果
+        # 三份日志逐个校验；REQUIRE_PDF=1 时 checker 会要求 longPdfPages === previewPages
+        shell: cmd
         env:
           REQUIRE_PDF: '1'
-        run: node tools/ci-selftest.mjs selftest-windows.log
+        run: |
+          node tools/ci-selftest.mjs selftest-windows.log
+          if errorlevel 1 exit /b %errorlevel%
+          node tools/ci-selftest.mjs selftest-windows-cjk.log
+          if errorlevel 1 exit /b %errorlevel%
+          node tools/ci-selftest.mjs selftest-windows-mixed.log
+          if errorlevel 1 exit /b %errorlevel%
       - name: 上传安装包
         uses: actions/upload-artifact@v4
         with:
@@ -52,7 +71,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-selftest
-          path: selftest-windows.log
+          path: |
+            selftest-windows.log
+            selftest-windows-cjk.log
+            selftest-windows-mixed.log
+          if-no-files-found: warn
+      - name: 上传 PDF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-pdf
+          path: ${{ runner.temp }}/wordlite-selftest-*.pdf
           if-no-files-found: warn
 
   macos:
@@ -81,13 +110,19 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
         run: |
-          set -o pipefail
+          # 三次自测任何一次失败都让 job 直接变红（tee 会把退出码吞掉，靠 pipefail + -e 兜住）
+          set -eo pipefail
           app='src-tauri/target/universal-apple-darwin/release/bundle/macos/WordLite.app'
           "$app/Contents/MacOS/wordlite" --selftest --long-print 2>&1 | tee selftest-macos.log
+          "$app/Contents/MacOS/wordlite" --selftest --long-print-file "$GITHUB_WORKSPACE/tools/fixtures/long-cjk.txt" 2>&1 | tee selftest-macos-cjk.log
+          "$app/Contents/MacOS/wordlite" --selftest --long-print-file "$GITHUB_WORKSPACE/tools/fixtures/long-mixed.txt" 2>&1 | tee selftest-macos-mixed.log
       - name: 校验自测结果
         env:
           REQUIRE_PDF: '1'
-        run: node tools/ci-selftest.mjs selftest-macos.log
+        run: |
+          node tools/ci-selftest.mjs selftest-macos.log
+          node tools/ci-selftest.mjs selftest-macos-cjk.log
+          node tools/ci-selftest.mjs selftest-macos-mixed.log
       - name: 上传 dmg
         uses: actions/upload-artifact@v4
         with:
@@ -98,14 +133,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-selftest
-          path: selftest-macos.log
+          path: |
+            selftest-macos.log
+            selftest-macos-cjk.log
+            selftest-macos-mixed.log
           if-no-files-found: warn
       - name: 上传 PDF
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: macos-pdf
-          path: ${{ runner.temp }}/wordlite-selftest-long.pdf
+          path: ${{ runner.temp }}/wordlite-selftest-*.pdf
           if-no-files-found: warn
 
   release:

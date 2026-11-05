@@ -751,7 +751,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (key === 'n') {
     e.preventDefault()
-    newDocument()
+    newDocumentOrWindow()
     return
   }
   if (key === 'p') {
@@ -870,6 +870,13 @@ function localizeShortcuts () {
     for (const span of helpDialog.querySelectorAll('.help-about-meta span')) {
       if (span.textContent.includes('WebView2')) span.textContent = span.textContent.replace('WebView2', 'WKWebView')
     }
+  }
+  // Mac 的 ⌘N 是新建窗口，不是清空当前窗口：按钮提示和帮助表都按 Mac 惯例写
+  const newButton = document.querySelector('#btnNew')
+  if (newButton) newButton.title = '新建窗口 (⌘N)'
+  for (const label of document.querySelectorAll('.shortcut-grid > span')) {
+    const kbd = label.nextElementSibling
+    if (kbd && kbd.tagName === 'KBD' && kbd.textContent === '⌘N') label.textContent = '新建窗口'
   }
 }
 
@@ -1192,6 +1199,20 @@ async function newDocument () {
   await fileApi.clearAutosave()
   showStatus('已新建文档')
   resetDocumentPosition()
+}
+
+// Mac 的 ⌘N 是「新建窗口」：当前窗口内容和未保存状态都不动，
+// 直接复用例外的开窗入口（与访达打开文件同一个 create_document_window）。
+async function newDocumentOrWindow () {
+  if (!isMac || !fileApi.newWindow) {
+    await newDocument()
+    return
+  }
+  try {
+    await fileApi.newWindow()
+  } catch (error) {
+    showStatus(`新建窗口失败：${error.message}`, 0)
+  }
 }
 
 async function loadFile (filePath) {
@@ -1920,10 +1941,12 @@ function renderPrintPreview () {
   const dims = pageDimensions()
   const margin = currentMargins()
   const pxPerCm = 37.7952756
+  // 正文可用高度要和打印页框完全一致：@page 的页边距吃掉的正好是 (页高 - 上下边距)，
+  // 之前多减 2px 会让某些块的边缘判断和 PDF 排版差一像素，页数就可能差 1。
   const pages = paginatePreview(
     clone,
     (dims.width - margin.left - margin.right) * pxPerCm,
-    (dims.height - margin.top - margin.bottom) * pxPerCm - 2
+    (dims.height - margin.top - margin.bottom) * pxPerCm
   )
   for (const [index, item] of pages.entries()) {
     const label = document.createElement('div')
@@ -1973,7 +1996,7 @@ document.querySelector('#printPageRanges').addEventListener('input', (e) => {
   e.target.classList.remove('invalid')
 })
 
-document.querySelector('#btnDoPrint').addEventListener('click', () => {
+document.querySelector('#btnDoPrint').addEventListener('click', async () => {
   const rangeText = document.querySelector('#printPageRanges').value.trim()
   const rangeError = document.querySelector('#printRangeError')
   if (rangeText && !/^\d+(\s*-\s*\d+)?(\s*,\s*\d+(\s*-\s*\d+)?)*$/.test(rangeText)) {
@@ -1995,17 +2018,38 @@ document.querySelector('#btnDoPrint').addEventListener('click', () => {
     }
   }
   const copies = Math.round(clamp(document.querySelector('#printCopies').value, 1, 99, 1))
+  // 先失焦再打印，否则编辑光标/选区可能跟着画进 PDF
+  await clearPrintFocus()
   fileApi.print({ pageRanges: rangeText, copies })
   printPreviewDialog.close()
 })
 
+// 打印/导出 PDF 前先让编辑器失焦并清掉选区：WKWebView 会把编辑光标和选区高亮
+// 一起画进 PDF（短文档第一次导出时末尾会多出一条蓝色竖线）。
+async function clearPrintFocus () {
+  const active = document.activeElement
+  if (active && active !== document.body && typeof active.blur === 'function') active.blur()
+  try {
+    window.getSelection()?.removeAllRanges()
+  } catch {
+    // 选区 API 不可用时忽略，打印样式里还有 caret-color: transparent 兜底
+  }
+  // 等两帧，确保失焦和重绘完成后再交给打印引擎
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+}
+
 async function exportPdf () {
+  const editorHadFocus = editor.view.hasFocus()
+  await clearPrintFocus()
   const defaultPath = `${currentFileName.replace(/\.[^.]+$/, '')}.pdf`
   try {
     const result = await fileApi.exportPdf(defaultPath)
     if (result?.saved) showStatus(`PDF 已导出：${result.path}`)
   } catch (error) {
     showStatus(`PDF 导出失败：${error.message}`, 0)
+  } finally {
+    // 导出走完后把焦点还给编辑器（打印面板期间不抢焦点，避免光标重新出现在打印内容里）
+    if (editorHadFocus) editor.commands.focus()
   }
 }
 
@@ -2026,7 +2070,7 @@ function runHistory (direction) {
 
 // Rust 端菜单点击后按约定发 menu-command，这里分发到已有函数
 const MENU_COMMANDS = {
-  new: () => newDocument(),
+  new: () => newDocumentOrWindow(),
   open: () => openDocument(),
   save: () => saveDocument(),
   saveAs: () => saveDocument(true),
@@ -2047,7 +2091,7 @@ fileApi.onMenuCommand?.((id) => {
 
 /* ---------------- 启动 ---------------- */
 
-document.querySelector('#btnNew').addEventListener('click', newDocument)
+document.querySelector('#btnNew').addEventListener('click', newDocumentOrWindow)
 document.querySelector('#btnOpen').addEventListener('click', openDocument)
 document.querySelector('#btnSave').addEventListener('click', () => saveDocument())
 document.querySelector('#btnSaveAs').addEventListener('click', () => saveDocument(true))

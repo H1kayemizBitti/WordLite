@@ -1093,7 +1093,18 @@ body.file-drag-over::after {
     border: 0;
   }
   .ProseMirror .page-break span { display: none; }
-  .ProseMirror table, .ProseMirror img { break-inside: avoid; }
+  /* 打印时不要画编辑光标、选区高亮和 gapcursor：WKWebView 会把它们一起画进 PDF */
+  .ProseMirror { caret-color: transparent !important; }
+  .ProseMirror ::selection { background: transparent !important; }
+  .ProseMirror::selection { background: transparent !important; }
+  .ProseMirror-gapcursor { display: none !important; }
+  /* 预览按“整段不拆页”分页；打印/PDF 也必须按整段分页，两边页数才对得上
+     （以前 PDF 会把段落拆到两页，每页多塞半段，页数比预览少）。
+     orphans/widows 设成 2 是第二道保险：就算 WebKit 忽略了 break-inside，
+     两行、三行的段落也没法拆成 1+1 或 1+2，仍然整段走。 */
+  .ProseMirror > * { break-inside: avoid; page-break-inside: avoid; }
+  .ProseMirror { orphans: 2; widows: 2; }
+  .ProseMirror table, .ProseMirror img { break-inside: avoid; page-break-inside: avoid; }
   .find-bar { display: none !important; }
   .ProseMirror .find-match { background: transparent !important; box-shadow: none !important; }
 }

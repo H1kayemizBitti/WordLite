@@ -42,6 +42,8 @@
     confirmAction: (message) => invoke('confirm_action', { message }),
     confirmSaveChanges: () => invoke('confirm_save_changes'),
     openInNewWindow: (filePath) => invoke('open_external', { path: filePath }),
+    // Mac 的 ⌘N：开一个新的空窗口，当前窗口内容不动（Windows 上渲染层不会调用）
+    newWindow: () => invoke('new_window'),
     setDocumentState: (dirty, fileName) => invoke('set_document_state', { dirty, fileName }),
     closeAfterSave: () => invoke('close_after_save'),
     // 关闭确认里选了「取消」：通知 Rust 中止退出流程；Windows 上该命令什么也不做

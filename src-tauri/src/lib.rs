@@ -153,7 +153,17 @@ fn supported_document_path(path: &Path) -> Option<String> {
 // 从命令行参数里找要打开的文档（资源管理器“打开方式”/双击关联文件）
 // 以 - 开头的参数全部跳过：macOS 启动时会带 -psn_0_12345 这类参数
 fn document_path_from_args<I: IntoIterator<Item = String>>(args: I) -> Option<String> {
+    // --long-print-file 的值是自测用的样本 txt，不能当成“要打开的文档”
+    let mut skip_next = false;
     for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--long-print-file" {
+            skip_next = true;
+            continue;
+        }
         if arg.starts_with('-') {
             continue;
         }
@@ -455,6 +465,40 @@ async fn open_external(app: tauri::AppHandle, path: String) -> Result<(), String
         return Ok(());
     }
     create_document_window(&app, Some(path)).map(|_| ())
+}
+
+// Mac 的 ⌘N：新开一个空窗口，当前窗口的内容和未保存状态都不动。
+// 新窗口相对原窗口层叠偏移一点（Mac 惯例），到屏幕边缘再回到工作区左上角。
+#[tauri::command]
+async fn new_window(app: tauri::AppHandle) -> Result<(), String> {
+    let anchor = menu_target_window(&app).map(|window| {
+        (
+            window.outer_position().ok(),
+            window.outer_size().ok(),
+            window.scale_factor().unwrap_or(1.0),
+            window.current_monitor().ok().flatten(),
+        )
+    });
+    let window = create_document_window(&app, None)?;
+    let Some((Some(position), Some(size), scale, monitor)) = anchor else {
+        return Ok(());
+    };
+    let step = (28.0 * scale).round() as i32;
+    let mut x = position.x + step;
+    let mut y = position.y + step;
+    if let Some(monitor) = monitor {
+        let area = monitor.work_area();
+        let max_x = area.position.x + area.size.width as i32 - size.width as i32;
+        let max_y = area.position.y + area.size.height as i32 - size.height as i32;
+        if x > max_x {
+            x = area.position.x + step;
+        }
+        if y > max_y {
+            y = area.position.y + step;
+        }
+    }
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+    Ok(())
 }
 
 // 访达双击 / 拖到 Dock 图标：启动阶段先排进主窗口的 pending_open，之后一律新开窗口
@@ -944,7 +988,7 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
 // ---- macOS 菜单栏（Windows 不建菜单，行为保持原样） ----
 #[cfg(target_os = "macos")]
 fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
     // 自定义项：点击后把 id 发给当前窗口。
     // 撤销/重做必须是自定义项，用系统 undo: 会绕过 TipTap 自己的历史记录。
@@ -1004,6 +1048,8 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .minimize_with_text("最小化")
         .maximize_with_text("缩放")
         .fullscreen_with_text("全屏")
+        .separator()
+        .item(&PredefinedMenuItem::bring_all_to_front(app, Some("前置全部窗口"))?)
         .build()?;
 
     let help_menu = SubmenuBuilder::new(app, "帮助")
@@ -1174,18 +1220,49 @@ pub fn run() {
             }
             if std::env::args().any(|arg| arg == "--selftest") {
                 let handle = app.handle().clone();
-                let long_print = std::env::args().any(|arg| arg == "--long-print");
-                let dialog_test = std::env::args().any(|arg| arg == "--dialog-test");
+                let args: Vec<String> = std::env::args().collect();
+                // --long-print：用内置的 600 段样本；--long-print-file <path>：用指定 txt（每行一段）
+                let long_print_file = args
+                    .iter()
+                    .position(|arg| arg == "--long-print-file")
+                    .and_then(|index| args.get(index + 1))
+                    .cloned();
+                let long_print =
+                    long_print_file.is_some() || args.iter().any(|arg| arg == "--long-print");
+                let dialog_test = args.iter().any(|arg| arg == "--dialog-test");
                 let probe = std::env::temp_dir().join("wordlite-tauri-selftest.txt");
                 let probe_json = serde_json::to_string(&probe.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "\"\"".into());
                 let probe_bin = std::env::temp_dir().join("wordlite-tauri-selftest.bin");
                 let probe_bin_json = serde_json::to_string(&probe_bin.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "\"\"".into());
-                // 长文档 PDF 落盘位置：CI 用 runner.temp 作 TMPDIR，再按这个路径上传
-                let long_pdf = std::env::temp_dir().join("wordlite-selftest-long.pdf");
+                // 长文档 PDF 落盘位置：CI 用 runner.temp 作 TMPDIR，再按这个路径上传。
+                // 指定样本文件时按文件名派生，两份样本各留一份 PDF 方便对照。
+                let long_pdf = match &long_print_file {
+                    Some(path) => {
+                        let stem: String = Path::new(path)
+                            .file_stem()
+                            .and_then(|value| value.to_str())
+                            .unwrap_or("file")
+                            .chars()
+                            .map(|ch| {
+                                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                                    ch
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect();
+                        std::env::temp_dir().join(format!("wordlite-selftest-{stem}.pdf"))
+                    }
+                    None => std::env::temp_dir().join("wordlite-selftest-long.pdf"),
+                };
                 let long_pdf_json = serde_json::to_string(&long_pdf.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "\"\"".into());
+                let long_file_json = match &long_print_file {
+                    Some(path) => serde_json::to_string(path).unwrap_or_else(|_| "null".into()),
+                    None => "null".into(),
+                };
                 let script = format!(
                     r#"(async () => {{
                         const results = {{}};
@@ -1231,10 +1308,28 @@ pub fn run() {
                                     editorEl.focus();
                                     document.execCommand('selectAll', false, null);
                                     document.execCommand('delete', false, null);
-                                    document.execCommand('insertHTML', false, '<p>测试分页内容，这是一段用于验证打印预览自动分页的示例文字。</p>'.repeat(600));
+                                    // --long-print-file 指定 txt 时每行一段；否则用内置的 600 段短段落样本
+                                    const longFile = {long_file};
+                                    let longHtml;
+                                    if (longFile) {{
+                                        const raw = await window.wordlite.file.readFile(longFile, false);
+                                        const escapeHtml = (value) => value
+                                            .replace(/&/g, '&amp;')
+                                            .replace(/</g, '&lt;')
+                                            .replace(/>/g, '&gt;');
+                                        const lines = raw.replace(/\r\n/g, '\n').split('\n');
+                                        while (lines.length && lines[lines.length - 1] === '') lines.pop();
+                                        longHtml = lines
+                                            .map((line) => (line ? '<p>' + escapeHtml(line) + '</p>' : '<p><br></p>'))
+                                            .join('');
+                                        results.longFile = longFile;
+                                    }} else {{
+                                        longHtml = '<p>测试分页内容，这是一段用于验证打印预览自动分页的示例文字。</p>'.repeat(600);
+                                    }}
+                                    document.execCommand('insertHTML', false, longHtml);
                                     await new Promise((resolve) => setTimeout(resolve, 500));
                                     results.longChars = editorEl.innerText.length;
-                                    const longPdf = await withTimeout(window.wordlite.file.printToPDF(), 25000);
+                                    const longPdf = await withTimeout(window.wordlite.file.printToPDF(), 40000);
                                     results.longPdfPages = (atob(longPdf).match(/\/Type\s*\/Page[^s]/g) || []).length;
                                     // 完整 PDF 落盘，交给 CI 上传后人工检查尺寸和边距
                                     await window.wordlite.file.writeFile({long_pdf}, longPdf, true);
@@ -1265,6 +1360,7 @@ pub fn run() {
                     probe = probe_json,
                     probe_bin = probe_bin_json,
                     long_pdf = long_pdf_json,
+                    long_file = long_file_json,
                     long_print = if long_print { "true" } else { "false" },
                     dialog_test = if dialog_test { "true" } else { "false" }
                 );
@@ -1273,8 +1369,9 @@ pub fn run() {
                     &script,
                 );
                 *app.state::<AppState>().selftest_script.lock().unwrap() = Some(script);
+                // 两份长文档样本各约 34 页，打印耗时更长，看门狗放宽到 75 秒
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(45));
+                    std::thread::sleep(std::time::Duration::from_secs(75));
                     println!("[selftest] watchdog timeout");
                     handle.exit(2);
                 });
@@ -1306,6 +1403,7 @@ pub fn run() {
             list_orphan_autosaves,
             restore_orphan_autosave,
             open_external,
+            new_window,
             set_document_state,
             renderer_ready,
             close_cancelled,
