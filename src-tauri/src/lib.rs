@@ -695,6 +695,28 @@ async fn export_pdf(
     Ok(serde_json::json!({ "saved": true, "path": file_path }))
 }
 
+// 只读尾部 1KB 找 %%EOF：CoreGraphics 逐页写盘，多页文档中途停顿时不能只看大小不变
+#[cfg(target_os = "macos")]
+fn pdf_tail_has_eof(path: &str) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(size) = file.metadata().map(|metadata| metadata.len()) else {
+        return false;
+    };
+    let tail = size.min(1024);
+    if tail == 0 || file.seek(SeekFrom::Start(size - tail)).is_err() {
+        return false;
+    }
+    let mut buffer = Vec::with_capacity(tail as usize);
+    if file.take(tail).read_to_end(&mut buffer).is_err() {
+        return false;
+    }
+    buffer.windows(5).any(|window| window == b"%%EOF")
+}
+
 // macOS：NSPrintOperation 以「保存到文件」的方式导出。边距交给渲染层的 @page，这里全设 0，避免双重边距。
 // 同步的 runOperation 在 WKWebView 上会输出空白页，所以用模态异步版本，完成信号靠轮询产物。
 #[cfg(target_os = "macos")]
@@ -713,6 +735,10 @@ fn print_to_pdf_file(
     let paper = NSSize::new(to_pt(page.page_width), to_pt(page.page_height));
 
     let target = file_path.to_string();
+    // 先打到同目录的临时文件，写完再改名覆盖目标：覆盖已有 PDF 时不会被旧文件的大小误导
+    let temp_path = format!("{target}.wltmp.pdf");
+    let _ = std::fs::remove_file(&temp_path);
+    let temp_for_print = temp_path.clone();
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
 
     window
@@ -738,7 +764,7 @@ fn print_to_pdf_file(
                 print_info.setJobDisposition(unsafe { NSPrintSaveJob });
 
                 // 输出文件走 NSPrintJobSavingURL；objc2 没生成 setValue:forKey:，直接发消息写字典
-                let url = NSURL::fileURLWithPath(&NSString::from_str(&target));
+                let url = NSURL::fileURLWithPath(&NSString::from_str(&temp_for_print));
                 let dictionary = unsafe { print_info.dictionary() };
                 unsafe {
                     let _: () = objc2::msg_send![
@@ -771,20 +797,27 @@ fn print_to_pdf_file(
         })
         .map_err(|e| format!("访问 webview 失败：{e}"))?;
 
-    rx.recv_timeout(std::time::Duration::from_secs(10))
-        .map_err(|_| "启动打印超时".to_string())??;
+    let started = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .map_err(|_| "启动打印超时".to_string())?;
+    if let Err(error) = started {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(error);
+    }
 
-    // 连续 300ms 大小不变即视为写盘结束，最多等 20 秒
+    // 大小连续 300ms 不变且尾部有 %%EOF 才算写完，最多等 20 秒
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut last_size = 0u64;
     let mut stable = 0u32;
+    let mut finished = false;
     while std::time::Instant::now() < deadline {
-        if let Ok(metadata) = std::fs::metadata(file_path) {
+        if let Ok(metadata) = std::fs::metadata(&temp_path) {
             let size = metadata.len();
             if size > 0 && size == last_size {
                 stable += 1;
-                if stable >= 3 {
-                    return Ok(());
+                if stable >= 3 && pdf_tail_has_eof(&temp_path) {
+                    finished = true;
+                    break;
                 }
             } else {
                 stable = 0;
@@ -793,7 +826,16 @@ fn print_to_pdf_file(
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    Err("PDF 导出超时".to_string())
+    if !finished {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err("PDF 导出超时".to_string());
+    }
+    // 写完才替换目标文件，旧 PDF 不会在新文件写一半时被覆盖
+    if let Err(error) = std::fs::rename(&temp_path, file_path) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(format!("PDF 导出失败：无法替换目标文件（{error}）"));
+    }
+    Ok(())
 }
 
 // 其他平台没有实现，保持迁移阶段 3 之前的行为
