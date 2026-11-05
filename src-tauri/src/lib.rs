@@ -646,7 +646,6 @@ fn print_to_pdf_file(
         .map_err(|_| "PDF 导出超时".to_string())?
 }
 
-#[cfg(windows)]
 #[tauri::command(rename_all = "camelCase")]
 async fn print_to_pdf(
     window: tauri::WebviewWindow,
@@ -661,7 +660,6 @@ async fn print_to_pdf(
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
-#[cfg(windows)]
 #[tauri::command(rename_all = "camelCase")]
 async fn export_pdf(
     window: tauri::WebviewWindow,
@@ -697,20 +695,116 @@ async fn export_pdf(
     Ok(serde_json::json!({ "saved": true, "path": file_path }))
 }
 
-#[cfg(not(windows))]
-#[tauri::command]
-async fn print_to_pdf() -> Result<String, String> {
-    Err("macOS 的 PDF 导出将在迁移阶段 3 实现".into())
+// macOS：NSPrintOperation 以「保存到文件」的方式导出。边距交给渲染层的 @page，这里全设 0，避免双重边距。
+// 同步的 runOperation 在 WKWebView 上会输出空白页，所以用模态异步版本，完成信号靠轮询产物。
+#[cfg(target_os = "macos")]
+fn print_to_pdf_file(
+    window: &tauri::WebviewWindow,
+    file_path: &str,
+    page: &PageMetrics,
+) -> Result<(), String> {
+    use objc2::rc::autoreleasepool;
+    use objc2_app_kit::{NSPrintInfo, NSPrintJobSavingURL, NSPrintSaveJob, NSWindow};
+    use objc2_foundation::{NSString, NSSize, NSURL};
+    use objc2_web_kit::WKWebView;
+
+    const CM_PER_INCH: f64 = 2.54;
+    let to_pt = |cm: f64| cm * 72.0 / CM_PER_INCH;
+    let paper = NSSize::new(to_pt(page.page_width), to_pt(page.page_height));
+
+    let target = file_path.to_string();
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+
+    window
+        .with_webview(move |webview| {
+            let outcome = autoreleasepool(|_pool| -> Result<(), String> {
+                let webview_ptr = webview.inner();
+                let window_ptr = webview.ns_window();
+                if webview_ptr.is_null() || window_ptr.is_null() {
+                    return Err("拿不到 WKWebView / NSWindow 句柄".to_string());
+                }
+                // 指针由 tauri 在主线程上给出，只在本闭包里借用
+                let wk_webview: &WKWebView = unsafe { &*(webview_ptr as *const WKWebView) };
+                let ns_window: &NSWindow = unsafe { &*(window_ptr as *const NSWindow) };
+
+                let print_info = NSPrintInfo::new();
+                print_info.setPaperSize(paper);
+                print_info.setLeftMargin(0.0);
+                print_info.setRightMargin(0.0);
+                print_info.setTopMargin(0.0);
+                print_info.setBottomMargin(0.0);
+                print_info.setHorizontallyCentered(false);
+                print_info.setVerticallyCentered(false);
+                print_info.setJobDisposition(unsafe { NSPrintSaveJob });
+
+                // 输出文件走 NSPrintJobSavingURL；objc2 没生成 setValue:forKey:，直接发消息写字典
+                let url = NSURL::fileURLWithPath(&NSString::from_str(&target));
+                let dictionary = unsafe { print_info.dictionary() };
+                unsafe {
+                    let _: () = objc2::msg_send![
+                        &*dictionary,
+                        setObject: &*url,
+                        forKey: NSPrintJobSavingURL
+                    ];
+                }
+
+                let operation = unsafe { wk_webview.printOperationWithPrintInfo(&print_info) };
+                operation.setShowsPrintPanel(false);
+                operation.setShowsProgressPanel(false);
+                // 打印操作的 view 要手动设成 webview 的 bounds，否则输出空白页
+                if let Some(print_view) = operation.view() {
+                    print_view.setFrame(wk_webview.bounds());
+                }
+                unsafe {
+                    operation.runOperationModalForWindow_delegate_didRunSelector_contextInfo(
+                        ns_window,
+                        None,
+                        None,
+                        std::ptr::null_mut(),
+                    );
+                }
+                // 模态打印在事件循环里继续跑，operation 必须活到结束，这里故意不释放
+                std::mem::forget(operation);
+                Ok(())
+            });
+            let _ = tx.send(outcome);
+        })
+        .map_err(|e| format!("访问 webview 失败：{e}"))?;
+
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .map_err(|_| "启动打印超时".to_string())??;
+
+    // 连续 300ms 大小不变即视为写盘结束，最多等 20 秒
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut last_size = 0u64;
+    let mut stable = 0u32;
+    while std::time::Instant::now() < deadline {
+        if let Ok(metadata) = std::fs::metadata(file_path) {
+            let size = metadata.len();
+            if size > 0 && size == last_size {
+                stable += 1;
+                if stable >= 3 {
+                    return Ok(());
+                }
+            } else {
+                stable = 0;
+                last_size = size;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err("PDF 导出超时".to_string())
 }
 
-#[cfg(not(windows))]
-#[tauri::command(rename_all = "camelCase")]
-async fn export_pdf(
-    default_path: String,
-    page: Option<PageMetrics>,
-) -> Result<serde_json::Value, String> {
-    let _ = (default_path, page);
-    Err("macOS 的 PDF 导出将在迁移阶段 3 实现".into())
+// 其他平台没有实现，保持迁移阶段 3 之前的行为
+#[cfg(not(any(windows, target_os = "macos")))]
+fn print_to_pdf_file(
+    window: &tauri::WebviewWindow,
+    file_path: &str,
+    page: &PageMetrics,
+) -> Result<(), String> {
+    let _ = (window, file_path, page);
+    Err("当前平台不支持 PDF 导出".into())
 }
 
 // 页面加载完成后由渲染层调用，确保 window.__TAURI__ 已注入再执行自测脚本
@@ -1046,6 +1140,10 @@ pub fn run() {
                 let probe_bin = std::env::temp_dir().join("wordlite-tauri-selftest.bin");
                 let probe_bin_json = serde_json::to_string(&probe_bin.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "\"\"".into());
+                // 长文档 PDF 落盘位置：CI 用 runner.temp 作 TMPDIR，再按这个路径上传
+                let long_pdf = std::env::temp_dir().join("wordlite-selftest-long.pdf");
+                let long_pdf_json = serde_json::to_string(&long_pdf.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| "\"\"".into());
                 let script = format!(
                     r#"(async () => {{
                         const results = {{}};
@@ -1096,6 +1194,9 @@ pub fn run() {
                                     results.longChars = editorEl.innerText.length;
                                     const longPdf = await withTimeout(window.wordlite.file.printToPDF(), 25000);
                                     results.longPdfPages = (atob(longPdf).match(/\/Type\s*\/Page[^s]/g) || []).length;
+                                    // 完整 PDF 落盘，交给 CI 上传后人工检查尺寸和边距
+                                    await window.wordlite.file.writeFile({long_pdf}, longPdf, true);
+                                    results.longPdfFile = {long_pdf};
                                     document.querySelector('#btnPrintPreview')?.click();
                                     await new Promise((resolve) => setTimeout(resolve, 500));
                                     results.previewPages = document.querySelectorAll('.preview-page').length;
@@ -1121,6 +1222,7 @@ pub fn run() {
                     }})()"#,
                     probe = probe_json,
                     probe_bin = probe_bin_json,
+                    long_pdf = long_pdf_json,
                     long_print = if long_print { "true" } else { "false" },
                     dialog_test = if dialog_test { "true" } else { "false" }
                 );
