@@ -2053,29 +2053,38 @@ let closePrompting = false
 fileApi.onSaveBeforeClose(async () => {
   if (closePrompting) return
   closePrompting = true
+  // 窗口最终有没有关掉。没关掉（取消、另存为被取消、写盘失败、抛异常）都要
+  // 通知 Rust 中止退出流程，否则 quitting 一直为 true，之后手动关窗口会把其余窗口一起关掉。
+  // Windows 上 closeCancelled 什么也不做。
+  let closed = false
   try {
     if (!dirty) {
+      closed = true
       fileApi.closeAfterSave()
       return
     }
     const choice = await fileApi.confirmSaveChanges()
     if (choice === 'save') {
-      // 另存为被取消时窗口保持打开
-      if (await saveDocument()) fileApi.closeAfterSave()
+      // 另存为被取消或写盘失败时窗口保持打开
+      if (await saveDocument()) {
+        closed = true
+        fileApi.closeAfterSave()
+      }
     } else if (choice === 'discard') {
       await fileApi.clearAutosave().catch(() => {})
+      closed = true
       fileApi.closeAfterSave()
-    } else {
-      // 用户选了「取消」：通知 Rust 中止退出流程（Windows 上这个命令什么也不做）
+    }
+  } catch (error) {
+    console.error(error)
+  } finally {
+    if (!closed) {
       try {
         await fileApi.closeCancelled?.()
       } catch {
         // 旧版 Rust 没有该命令，忽略即可
       }
     }
-  } catch (error) {
-    console.error(error)
-  } finally {
     closePrompting = false
   }
 })

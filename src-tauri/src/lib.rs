@@ -952,7 +952,25 @@ fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             ..
         } => {
             if !has_visible_windows {
-                let _ = create_document_window(app, None);
+                // 点 Dock 图标：窗口只是被最小化或隐藏时把它调出来，一个窗口都没有才新建
+                let mut windows: Vec<tauri::WebviewWindow> =
+                    app.webview_windows().into_values().collect();
+                if windows.is_empty() {
+                    let _ = create_document_window(app, None);
+                } else {
+                    // 优先主窗口，其次 label 最小的，保证每次点到同一个
+                    windows.sort_by(|a, b| {
+                        let key = |window: &tauri::WebviewWindow| {
+                            (window.label() != "main", window.label().to_string())
+                        };
+                        key(a).cmp(&key(b))
+                    });
+                    if let Some(window) = windows.into_iter().next() {
+                        let _ = window.unminimize();
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
             }
         }
         // 访达双击 / 拖到 Dock 图标 / “打开方式”
