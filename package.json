@@ -6,7 +6,7 @@
   "description": "离线、轻量的桌面写字板：DOCX 编辑、打印与 PDF 导出",
   "license": "MIT",
   "scripts": {
-    "build": "esbuild ./renderer/app.js --bundle --outfile=./renderer/bundle.js --format=iife --target=chrome130",
+    "build": "esbuild ./renderer/app.js --bundle --outfile=./renderer/bundle.js --format=iife --target=chrome130,safari16",
     "tauri": "tauri",
     "tauri:dev": "npm run build && tauri dev",
     "tauri:build": "npm run build && tauri build"

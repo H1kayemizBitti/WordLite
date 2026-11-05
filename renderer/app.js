@@ -33,17 +33,19 @@ import { docxBase64ToJSON, jsonToDocxBase64 } from './docx.js'
 
 /* ---------------- 常量 ---------------- */
 
+// 第一项必须是 Windows 字体名：docx.js 导出时只取逗号前的第一个名字写进 DOCX，
+// 后面补的是 Mac 上的同族字体，只影响屏幕显示。
 const FONTS = [
-  { label: '等线', value: 'DengXian, 等线, "Microsoft YaHei", 微软雅黑, sans-serif' },
-  { label: '宋体', value: 'SimSun, 宋体, serif' },
-  { label: '黑体', value: 'SimHei, 黑体, sans-serif' },
-  { label: '仿宋', value: 'FangSong, 仿宋, SimSun, serif' },
-  { label: '楷体', value: 'KaiTi, 楷体, serif' },
-  { label: '微软雅黑', value: '"Microsoft YaHei", 微软雅黑, sans-serif' },
+  { label: '等线', value: 'DengXian, 等线, "Microsoft YaHei", 微软雅黑, "PingFang SC", sans-serif' },
+  { label: '宋体', value: 'SimSun, 宋体, "Songti SC", STSong, serif' },
+  { label: '黑体', value: 'SimHei, 黑体, "Heiti SC", STHeiti, sans-serif' },
+  { label: '仿宋', value: 'FangSong, 仿宋, STFangsong, SimSun, serif' },
+  { label: '楷体', value: 'KaiTi, 楷体, "Kaiti SC", STKaiti, serif' },
+  { label: '微软雅黑', value: '"Microsoft YaHei", 微软雅黑, "PingFang SC", sans-serif' },
   { label: 'Arial', value: 'Arial, sans-serif' },
   { label: 'Times New Roman', value: '"Times New Roman", serif' },
   { label: 'Georgia', value: 'Georgia, serif' },
-  { label: 'Consolas', value: 'Consolas, monospace' },
+  { label: 'Consolas', value: 'Consolas, Menlo, "SF Mono", monospace' },
   { label: 'Courier New', value: '"Courier New", monospace' }
 ]
 
@@ -87,6 +89,10 @@ const DEFAULT_SETTINGS = {
 }
 
 const fileApi = window.wordlite.file
+// 平台判断由 tauri-bridge.js 写入；Electron 里没有这个字段，按 Windows 处理
+const isMac = window.wordlite.platform === 'mac'
+// Mac 上所有快捷键用 ⌘；Ctrl 组合键一律不拦截（Ctrl+A/E/K/H 是系统的文本编辑键位）
+const isMod = (e) => isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey
 const isSmoke = new URLSearchParams(location.search).has('smoke')
 let currentPath = null
 let currentFileName = '未命名文档'
@@ -122,9 +128,19 @@ function storageWrite (key, value) {
   }
 }
 
+// 字体值是整串 CSS 字体栈，版本升级后可能对不上：按第一个字体名找回当前的值，
+// 避免老用户存在本地的默认字体被重置
+function normalizeFontFamily (value) {
+  if (FONTS.some((font) => font.value === value)) return value
+  const first = String(value || '').split(',')[0].replace(/["']/g, '').trim().toLowerCase()
+  if (!first) return DEFAULT_SETTINGS.fontFamily
+  const match = FONTS.find((font) => font.value.split(',')[0].replace(/["']/g, '').trim().toLowerCase() === first)
+  return match ? match.value : DEFAULT_SETTINGS.fontFamily
+}
+
 function normalizeSettings (input = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...(input && typeof input === 'object' ? input : {}) }
-  if (!FONTS.some((font) => font.value === settings.fontFamily)) settings.fontFamily = DEFAULT_SETTINGS.fontFamily
+  settings.fontFamily = normalizeFontFamily(settings.fontFamily)
   if (!SIZES.includes(String(settings.fontSize))) settings.fontSize = DEFAULT_SETTINGS.fontSize
   settings.fontSize = String(settings.fontSize)
   settings.lineHeight = String(clamp(settings.lineHeight, 0.8, 3, Number(DEFAULT_SETTINGS.lineHeight)))
@@ -384,8 +400,9 @@ async function pasteFromClipboard () {
     const text = await navigator.clipboard.readText()
     if (text) editor.chain().focus().insertContent(text).run()
   } catch {
-    // 剪贴板读取被拒时退化为 Chromium 原生粘贴
-    document.execCommand('paste')
+    // 剪贴板读取被拒时退化为 Chromium 原生粘贴；WKWebView 里这条也可能被拒
+    const pasted = document.execCommand('paste')
+    if (isMac && !pasted) showStatus('无法读取剪贴板，请按 ⌘V 粘贴')
   }
 }
 
@@ -435,7 +452,7 @@ function captureFormat () {
       spacingAfter: Number.isFinite(block.spacingAfter) ? block.spacingAfter : null
     }
   }
-  showStatus('已复制格式；选中目标后点“格式刷”或按 Ctrl+Shift+V 应用')
+  showStatus(localizeShortcutText('已复制格式；选中目标后点“格式刷”或按 Ctrl+Shift+V 应用'))
 }
 
 function applyFormatPainter () {
@@ -654,7 +671,7 @@ function isFormTarget (target) {
 // TipTap 自带 Mod-e（行内代码）和 Mod-Enter（换行），与 Word 的居中/分页冲突，
 // 在捕获阶段先截住，避免编辑器快捷键抢先处理。
 document.addEventListener('keydown', (e) => {
-  if (!e.ctrlKey || e.altKey || e.isComposing || e.defaultPrevented || isFormTarget(e.target)) return
+  if (!isMod(e) || e.altKey || e.isComposing || e.defaultPrevented || isFormTarget(e.target)) return
   if (!e.shiftKey && e.key.toLowerCase() === 'e') {
     e.preventDefault()
     e.stopPropagation()
@@ -694,7 +711,22 @@ document.addEventListener('keydown', (e) => {
     return
   }
 
-  if (!e.ctrlKey || e.altKey) return
+  // Mac：⌘? 打开帮助（F1 仍然有效）
+  if (isMac && e.metaKey && !e.ctrlKey && !e.altKey && e.key === '?') {
+    e.preventDefault()
+    openHelp()
+    return
+  }
+
+  // Mac：替换改用 ⌥⌘F（⌘H 是系统「隐藏」）。按住 Option 时 e.key 变成 ƒ，
+  // 只能用 e.code 判断，所以这条必须放在下面 altKey 早退之前
+  if (isMac && e.metaKey && e.altKey && !e.ctrlKey && e.code === 'KeyF') {
+    e.preventDefault()
+    openFind('replace')
+    return
+  }
+
+  if (!isMod(e) || e.altKey) return
   const key = e.key.toLowerCase()
   const inForm = isFormTarget(e.target)
 
@@ -704,7 +736,8 @@ document.addEventListener('keydown', (e) => {
     return
   }
   // 查找/替换优先于普通表单输入，但设置、帮助等模态框打开时不抢快捷键
-  if (!e.shiftKey && (key === 'f' || key === 'h') && !document.querySelector('dialog[open]')) {
+  // Mac 上 ⌘H 留给系统「隐藏」，替换改走上面的 ⌥⌘F
+  if (!e.shiftKey && (key === 'f' || (!isMac && key === 'h')) && !document.querySelector('dialog[open]')) {
     e.preventDefault()
     openFind(key === 'h' ? 'replace' : 'find')
     return
@@ -788,12 +821,57 @@ document.addEventListener('keydown', (e) => {
     editor.chain().focus().setParagraph().run()
     return
   }
-  if (key === 'm') {
+  // Mac 上 ⌘M 是系统「最小化」，缩进改用 ⌘] / ⌘[（由 Indent 扩展自带的 Mod-] / Mod-[ 处理）
+  if (key === 'm' && !isMac) {
     e.preventDefault()
     if (e.shiftKey) editor.chain().focus().outdent().run()
     else editor.chain().focus().indent().run()
   }
 })
+
+/* ---------------- Mac 快捷键文案 ---------------- */
+
+// D4：Mac 上 Ctrl 一律换成 ⌘，另有三处和系统冲突的键位要改
+function localizeShortcutText (text) {
+  if (!isMac || !text) return text
+  return text
+    .replace(/Ctrl\+Shift\+M\b/g, '⌘[')
+    .replace(/Ctrl\+M\b/g, '⌘]')
+    .replace(/Ctrl\+H\b/g, '⌥⌘F')
+    .replace(/Ctrl\+/g, '⌘')
+    .replace(/Shift\+/g, '⇧')
+    .replace(/Alt\+/g, '⌥')
+    .replace(/\bF1\b/g, '⌘?')
+}
+
+// 启动时把界面里写死的快捷键文案换成 Mac 记法；Windows 上什么也不做
+function localizeShortcuts () {
+  if (!isMac) return
+  for (const el of document.querySelectorAll('[title]')) {
+    // 最近文件的标题是磁盘路径，可能含 “Ctrl+” 这类文件名，不能改
+    if (el.closest('#recentList')) continue
+    const before = el.title
+    const after = localizeShortcutText(before)
+    if (after === before) continue
+    el.title = after
+    if (el.getAttribute('aria-label') === before) el.setAttribute('aria-label', after)
+  }
+  for (const el of document.querySelectorAll('kbd')) {
+    el.textContent = localizeShortcutText(el.textContent)
+  }
+  // 帮助正文里的快捷键说明（例如“Ctrl+F 查找、F1 打开帮助”）
+  const helpDialog = document.querySelector('#helpDialog')
+  if (helpDialog) {
+    const walker = document.createTreeWalker(helpDialog, NodeFilter.SHOW_TEXT)
+    const nodes = []
+    while (walker.nextNode()) nodes.push(walker.currentNode)
+    for (const node of nodes) node.nodeValue = localizeShortcutText(node.nodeValue)
+    // 关于里的技术栈也跟着平台走
+    for (const span of helpDialog.querySelectorAll('.help-about-meta span')) {
+      if (span.textContent.includes('WebView2')) span.textContent = span.textContent.replace('WebView2', 'WKWebView')
+    }
+  }
+}
 
 /* ---------------- 工具栏状态同步 ---------------- */
 
@@ -1022,6 +1100,43 @@ function textToJSON (text) {
   }
 }
 
+// 导入 DOCX 时行内常常只写了一个 Windows 字体名（例如 SimSun），
+// 在 Mac 上会落到系统默认字体。这里补上同族字体，只影响显示：
+// 导出时 docx.js 仍取第一个名字，写回 DOCX 的还是原来的 Windows 字体。
+const MAC_FONT_FALLBACKS = {
+  dengxian: 'PingFang SC',
+  '等线': 'PingFang SC',
+  'microsoft yahei': 'PingFang SC',
+  '微软雅黑': 'PingFang SC',
+  simsun: 'Songti SC, STSong',
+  '宋体': 'Songti SC, STSong',
+  simhei: 'Heiti SC, STHeiti',
+  '黑体': 'Heiti SC, STHeiti',
+  fangsong: 'STFangsong',
+  '仿宋': 'STFangsong',
+  kaiti: 'Kaiti SC, STKaiti',
+  '楷体': 'Kaiti SC, STKaiti',
+  consolas: 'Menlo, "SF Mono"'
+}
+
+function applyMacFontFallback (json) {
+  if (!isMac || !json) return json
+  const walk = (node) => {
+    for (const mark of node.marks || []) {
+      if (mark.type !== 'textStyle') continue
+      const family = mark.attrs?.fontFamily
+      if (!family || family.includes(',')) continue
+      const key = family.replace(/["']/g, '').trim().toLowerCase()
+      const fallback = MAC_FONT_FALLBACKS[key]
+      if (!fallback) continue
+      mark.attrs = { ...mark.attrs, fontFamily: `${family}, ${fallback}` }
+    }
+    for (const child of node.content || []) walk(child)
+  }
+  walk(json)
+  return json
+}
+
 function resetDocumentPosition () {
   editor.chain().focus().setTextSelection(1).run()
   const workspace = document.querySelector('#workspace')
@@ -1083,7 +1198,7 @@ async function loadFile (filePath) {
     let importedPageSetup = null
     if (format === 'docx') {
       const result = await docxBase64ToJSON(data, editorExtensions)
-      json = result.json
+      json = applyMacFontFallback(result.json)
       importedPageSetup = result.pageSetup
       if (result.warnings.length) console.warn('[docx]', result.warnings)
     } else {
@@ -1879,7 +1994,7 @@ document.querySelector('#btnDoPrint').addEventListener('click', () => {
   printPreviewDialog.close()
 })
 
-document.querySelector('#btnExportPdf').addEventListener('click', async () => {
+async function exportPdf () {
   const defaultPath = `${currentFileName.replace(/\.[^.]+$/, '')}.pdf`
   try {
     const result = await fileApi.exportPdf(defaultPath)
@@ -1887,6 +2002,42 @@ document.querySelector('#btnExportPdf').addEventListener('click', async () => {
   } catch (error) {
     showStatus(`PDF 导出失败：${error.message}`, 0)
   }
+}
+
+document.querySelector('#btnExportPdf').addEventListener('click', exportPdf)
+
+/* ---------------- 菜单命令（macOS 菜单栏） ---------------- */
+
+// 焦点在查找/替换输入框时，撤销/重做交给输入框自己处理
+function runHistory (direction) {
+  if (isFormTarget(document.activeElement)) {
+    document.execCommand(direction)
+    return
+  }
+  const chain = editor.chain().focus()
+  if (direction === 'undo') chain.undo().run()
+  else chain.redo().run()
+}
+
+// Rust 端菜单点击后按约定发 menu-command，这里分发到已有函数
+const MENU_COMMANDS = {
+  new: () => newDocument(),
+  open: () => openDocument(),
+  save: () => saveDocument(),
+  saveAs: () => saveDocument(true),
+  exportPdf: () => exportPdf(),
+  print: () => openPrintPreview(),
+  printPreview: () => openPrintPreview(),
+  undo: () => runHistory('undo'),
+  redo: () => runHistory('redo'),
+  find: () => openFind('find'),
+  replace: () => openFind('replace'),
+  help: () => openHelp()
+}
+
+fileApi.onMenuCommand?.((id) => {
+  const run = MENU_COMMANDS[id]
+  if (run) run()
 })
 
 /* ---------------- 启动 ---------------- */
@@ -1914,6 +2065,13 @@ fileApi.onSaveBeforeClose(async () => {
     } else if (choice === 'discard') {
       await fileApi.clearAutosave().catch(() => {})
       fileApi.closeAfterSave()
+    } else {
+      // 用户选了「取消」：通知 Rust 中止退出流程（Windows 上这个命令什么也不做）
+      try {
+        await fileApi.closeCancelled?.()
+      } catch {
+        // 旧版 Rust 没有该命令，忽略即可
+      }
     }
   } catch (error) {
     console.error(error)
@@ -1930,6 +2088,7 @@ function updateStatusBar () {
 }
 
 // 设置里的默认字体/字号/行距只作用于未单独设格式的文字；新文档优先采用这些默认值
+localizeShortcuts()
 applyDefaultStyles()
 populateSettingsForm()
 renderRecentFiles()
