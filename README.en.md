@@ -52,7 +52,7 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 
 1. Grab `WordLite_<version>_universal.dmg` from [Releases](../../releases/latest) — one package for both Apple silicon and Intel
 2. Open the dmg and drag the app into **Applications** (it shows up as 简写 on Chinese systems and as WordLite on English ones)
-3. First launch: the build is ad-hoc signed and not notarized, so double-clicking shows "Apple could not verify…". Open **System Settings → Privacy & Security**, click **Open Anyway** in the notice at the bottom, then confirm
+3. First launch: the build is ad-hoc signed and not notarized, so double-clicking shows "Apple could not verify…". Open **System Settings → Privacy & Security**, click **Open Anyway** in the notice at the bottom, then confirm. macOS will ask for your administrator password; enter it, then click **Open Anyway** again
 4. Once installed, the menu bar and the Dock show 简写
 
 > On macOS 13 / 14 you can also hold <kbd>Control</kbd>, click the icon and choose "Open"; macOS 15 removed that shortcut, so use System Settings.
@@ -197,7 +197,7 @@ docs/                   README screenshot and migration notes
 The build is not signed yet. Click **More info → Run anyway**, then launch from the Start menu.
 
 **macOS says the app cannot be opened because Apple could not verify it?**
-It is not notarized, and nothing is wrong with the file. Open **System Settings → Privacy & Security**, click **Open Anyway** in the notice at the bottom, then confirm. Double-clicking works normally afterwards.
+It is not notarized, and nothing is wrong with the file. Open **System Settings → Privacy & Security**, click **Open Anyway** in the notice at the bottom, then confirm. macOS will ask for your administrator password; enter it, then click **Open Anyway** again. Double-clicking works normally afterwards.
 
 **WebView2 is missing?**
 Install the Microsoft Edge [WebView2](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2) Runtime (Windows 11 and most Windows 10 installations already have it). This only applies to Windows; macOS uses the system WKWebView.

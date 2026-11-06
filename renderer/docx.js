@@ -366,7 +366,14 @@ const RUN_TEXT_SKIP = new Set([
 // mammoth 会把这几类元素换成别的字符（符号、脚注角标），正文文字对不上，整段不染
 const RUN_TEXT_REWRITE = new Set(['w:sym', 'w:footnoteReference', 'w:endnoteReference'])
 
-function inlineRunStyle (properties) {
+// DOCX 里只写一个字体名，导入时交给调用方的解析函数映射回下拉框的整串字体栈；
+// 解析不到（不是内置字体）就原样保留，屏幕上按原字体名显示。
+function resolveRunFont (name, options) {
+  const value = typeof options?.resolveFontFamily === 'function' ? options.resolveFontFamily(name) : null
+  return value || name
+}
+
+function inlineRunStyle (properties, options) {
   if (!properties) return null
   let color = null
   const colorValue = directChild(properties, 'w:color')?.getAttribute('w:val')
@@ -383,13 +390,18 @@ function inlineRunStyle (properties) {
       highlight = `#${fill.toLowerCase()}`
     }
   }
-  return color || highlight ? { color, highlight } : null
+  // 字体优先取东亚字体，没有就取西文；只写主题字体（w:asciiTheme 等）的跟随主题，不处理
+  let font = null
+  const fonts = directChild(properties, 'w:rFonts')
+  const fontName = fonts?.getAttribute('w:eastAsia') || fonts?.getAttribute('w:ascii')
+  if (fontName) font = resolveRunFont(fontName.trim(), options)
+  return color || highlight || font ? { color, highlight, font } : null
 }
 
-function styleForTextNode (node) {
+function styleForTextNode (node, options) {
   let current = node.parentNode
   while (current) {
-    if (current.nodeName === 'w:r') return inlineRunStyle(directChild(current, 'w:rPr'))
+    if (current.nodeName === 'w:r') return inlineRunStyle(directChild(current, 'w:rPr'), options)
     if (current.nodeName === 'w:p') return null
     current = current.parentNode
   }
@@ -397,7 +409,7 @@ function styleForTextNode (node) {
 }
 
 // 按文档顺序把每个段落拆成"文字段 + 字符样式"，段落文字必须和 mammoth 产出的完全一致才采用
-function paragraphRunSegments (xml) {
+function paragraphRunSegments (xml, options) {
   const paragraphs = []
   for (const paragraph of Array.from(xml.getElementsByTagName('w:p'))) {
     const segments = []
@@ -406,10 +418,10 @@ function paragraphRunSegments (xml) {
       for (const child of Array.from(element.children || [])) {
         const name = child.nodeName
         if (RUN_TEXT_SKIP.has(name)) continue
-        if (name === 'w:t') segments.push({ text: child.textContent || '', style: styleForTextNode(child) })
-        else if (name === 'w:tab') segments.push({ text: '\t', style: styleForTextNode(child) })
-        else if (name === 'w:noBreakHyphen') segments.push({ text: '\u2011', style: styleForTextNode(child) })
-        else if (name === 'w:softHyphen') segments.push({ text: '\u00AD', style: styleForTextNode(child) })
+        if (name === 'w:t') segments.push({ text: child.textContent || '', style: styleForTextNode(child, options) })
+        else if (name === 'w:tab') segments.push({ text: '\t', style: styleForTextNode(child, options) })
+        else if (name === 'w:noBreakHyphen') segments.push({ text: '\u2011', style: styleForTextNode(child, options) })
+        else if (name === 'w:softHyphen') segments.push({ text: '\u00AD', style: styleForTextNode(child, options) })
         else if (RUN_TEXT_REWRITE.has(name)) rewritten = true
         else walk(child)
       }
@@ -436,14 +448,27 @@ function styleAtOffset (ranges, offset) {
   return null
 }
 
-function wrapSegments (block, segments) {
+function firstFontName (value) {
+  return String(value || '').split(',')[0].replace(/["']/g, '').trim().toLowerCase()
+}
+
+// 和文档默认字体同名（含「等线」「DengXian」这种中英别名）就不必逐字加字体标记
+function sameFontName (value, defaultFamily) {
+  const name = firstFontName(value)
+  return !!name && name === firstFontName(defaultFamily)
+}
+
+function wrapSegments (block, segments, options) {
+  const defaultFamily = options?.defaultFontFamily
   const ranges = []
   let offset = 0
   for (const segment of segments) {
     const start = offset
     offset += segment.text.length
     if (!segment.style) continue
-    ranges.push({ start, end: offset, color: segment.style.color, highlight: segment.style.highlight })
+    const font = sameFontName(segment.style.font, defaultFamily) ? null : segment.style.font
+    if (!segment.style.color && !segment.style.highlight && !font) continue
+    ranges.push({ start, end: offset, color: segment.style.color, highlight: segment.style.highlight, font })
   }
   if (!ranges.length) return
   const textNodes = []
@@ -458,7 +483,7 @@ function wrapSegments (block, segments) {
     const pieces = []
     for (let index = 0; index < text.length; index++) {
       const style = styleAtOffset(ranges, start + index)
-      const key = style ? `${style.color || '-'}|${style.highlight || '-'}` : ''
+      const key = style ? `${style.color || '-'}|${style.highlight || '-'}|${style.font || '-'}` : ''
       const last = pieces[pieces.length - 1]
       if (last && last.key === key) last.text += text[index]
       else pieces.push({ key, text: text[index], style })
@@ -477,9 +502,10 @@ function wrapSegments (block, segments) {
         mark.append(element)
         element = mark
       }
-      if (piece.style.color) {
+      if (piece.style.color || piece.style.font) {
         const span = document.createElement('span')
-        span.style.color = piece.style.color
+        if (piece.style.color) span.style.color = piece.style.color
+        if (piece.style.font) span.style.fontFamily = piece.style.font
         span.append(element)
         element = span
       }
@@ -502,8 +528,8 @@ function firstAtLeast (values, target) {
 
 // mammoth 不读 w:color / w:highlight / w:shd，这里按段落文字逐字对齐，把颜色补回 HTML。
 // 对齐不上（段落文字和 mammoth 产出不一致）就整段放弃，宁可不染也不能染错字。
-function injectRunStyles (html, xml) {
-  const paragraphs = paragraphRunSegments(xml)
+function injectRunStyles (html, xml, options) {
+  const paragraphs = paragraphRunSegments(xml, options)
   if (!paragraphs.length) return html
   const byText = new Map()
   paragraphs.forEach((paragraph, position) => {
@@ -530,9 +556,39 @@ function injectRunStyles (html, xml) {
     const position = firstAtLeast(positions, cursor)
     if (position === undefined) continue
     cursor = position + 1
-    wrapSegments(block, paragraphs[position].segments)
+    wrapSegments(block, paragraphs[position].segments, options)
   }
   return container.innerHTML
+}
+
+// 浏览器会把内联的字体栈重新序列化（加引号、去空格），这里统一回 FONTS 的整串值：
+// 工具栏字体下拉框是按整串比对的，值对不上就显示不出「仿宋」。
+// 另外，和文档默认字体相同的 run 去掉字体标记，避免整篇每个字都带字体属性。
+function normalizeRunFonts (json, options) {
+  const defaultFamily = options?.defaultFontFamily
+  const resolve = typeof options?.resolveFontFamily === 'function' ? options.resolveFontFamily : null
+  walkJson(json, (node) => {
+    if (!node.marks?.length) return
+    let touched = false
+    const marks = []
+    for (const mark of node.marks) {
+      if (mark.type !== 'textStyle' || !mark.attrs?.fontFamily) {
+        marks.push(mark)
+        continue
+      }
+      touched = true
+      const name = firstFontName(mark.attrs.fontFamily)
+      const value = (resolve ? resolve(name) : null) || mark.attrs.fontFamily
+      if (!name || sameFontName(value, defaultFamily)) {
+        const attrs = { ...mark.attrs }
+        delete attrs.fontFamily
+        if (Object.values(attrs).some((item) => item !== null && item !== undefined && item !== '')) marks.push({ ...mark, attrs })
+        continue
+      }
+      marks.push({ ...mark, attrs: { ...mark.attrs, fontFamily: value } })
+    }
+    if (touched) node.marks = marks
+  })
 }
 
 // 浏览器会把内联的 #ff0000 归一成 rgb(255, 0, 0)，这里统一回 #rrggbb，
@@ -548,7 +604,9 @@ function normalizeRunColors (json) {
   })
 }
 
-export async function docxBase64ToJSON (base64, extensions) {
+// options 由调用方（app.js）传入，用来把 DOCX 里的字体名映射回工具栏字体栈，
+// 并排除和文档默认字体相同的 run：{ defaultFontFamily, resolveFontFamily }
+export async function docxBase64ToJSON (base64, extensions, options = {}) {
   const zip = await JSZip.loadAsync(base64ToBytes(base64))
   const file = zip.file('word/document.xml')
   const xml = file ? await file.async('string') : ''
@@ -561,8 +619,9 @@ export async function docxBase64ToJSON (base64, extensions) {
   }
   const converted = await zip.generateAsync({ type: 'uint8array' })
   const result = await mammoth.convertToHtml({ arrayBuffer: converted.buffer })
-  const html = marked ? injectRunStyles(result.value, new DOMParser().parseFromString(marked, 'application/xml')) : result.value
+  const html = marked ? injectRunStyles(result.value, new DOMParser().parseFromString(marked, 'application/xml'), options) : result.value
   const json = generateJSON(html, extensions)
+  normalizeRunFonts(json, options)
   normalizeRunColors(json)
   if (xml) {
     const xmlDocument = new DOMParser().parseFromString(xml, 'application/xml')

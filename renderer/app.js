@@ -138,6 +138,35 @@ function normalizeFontFamily (value) {
   return match ? match.value : DEFAULT_SETTINGS.fontFamily
 }
 
+// DOCX 里只存一个字体名（并写全 ascii/hAnsi/eastAsia/cs 四个属性），导入时按名字映射回上面的
+// 字体栈：下拉框按整串取值显示「仿宋」，导出仍只取第一个名字，映射不改变写回 DOCX 的字体名。
+// 不在列表里的字体名返回 null，导入侧原样保留。
+const GENERIC_FONTS = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui'])
+const FONT_TOKENS = new Map(FONTS.map((font) => [font, font.value.split(',')
+  .map((item) => item.replace(/["']/g, '').trim().toLowerCase())
+  .filter((item) => item && !GENERIC_FONTS.has(item))]))
+function fontFamilyFromName (name) {
+  const value = String(name || '').replace(/["']/g, '').trim().toLowerCase()
+  if (!value || GENERIC_FONTS.has(value)) return null
+  // 先按字体栈的第一个名字（写回 DOCX 的就是它），再按下拉框的标签（「微软雅黑」「等线」这类中文名）
+  const exact = FONTS.find((font) => FONT_TOKENS.get(font)[0] === value)
+  if (exact) return exact.value
+  const label = FONTS.find((font) => font.label.toLowerCase() === value)
+  if (label) return label.value
+  // 最后按回退名字匹配，取在字体栈里位置最靠前的那个：
+  // 微软雅黑同时出现在等线的回退里，按名字扫会先撞上等线，所以用位置排序而不是第一命中
+  let best = null
+  let bestIndex = Infinity
+  for (const font of FONTS) {
+    const index = FONT_TOKENS.get(font).indexOf(value)
+    if (index > 0 && index < bestIndex) {
+      best = font
+      bestIndex = index
+    }
+  }
+  return best ? best.value : null
+}
+
 function normalizeSettings (input = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...(input && typeof input === 'object' ? input : {}) }
   settings.fontFamily = normalizeFontFamily(settings.fontFamily)
@@ -1223,7 +1252,10 @@ async function loadFile (filePath) {
     let json
     let importedPageSetup = null
     if (format === 'docx') {
-      const result = await docxBase64ToJSON(data, editorExtensions)
+      const result = await docxBase64ToJSON(data, editorExtensions, {
+        defaultFontFamily: settings.fontFamily,
+        resolveFontFamily: fontFamilyFromName
+      })
       json = applyMacFontFallback(result.json)
       importedPageSetup = result.pageSetup
       if (result.warnings.length) console.warn('[docx]', result.warnings)
