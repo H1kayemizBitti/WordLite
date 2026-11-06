@@ -1,0 +1,26 @@
+{
+  "projectName": "WordLite",
+  "projectOwner": "H1kayemizBitti",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md",
+    "README.en.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitConvention": "angular",
+  "contributors": [
+    {
+      "login": "custodiet0512",
+      "name": "Wyatt",
+      "avatar_url": "https://avatars.githubusercontent.com/u/226888570?v=4",
+      "profile": "https://github.com/custodiet0512",
+      "contributions": [
+        "test"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "linkToUsage": true
+}
