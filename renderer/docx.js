@@ -366,15 +366,77 @@ const RUN_TEXT_SKIP = new Set([
 // mammoth 会把这几类元素换成别的字符（符号、脚注角标），正文文字对不上，整段不染
 const RUN_TEXT_REWRITE = new Set(['w:sym', 'w:footnoteReference', 'w:endnoteReference'])
 
+// styles.xml 里的字体继承链：段落样式（pStyle → basedOn…）→ docDefaults。
+// 只认显式写的字体名；只写主题字体（w:asciiTheme 等）的跟随主题，不处理。
+// Word 内置的 Heading1-9 / Title 用的是主题字体，这类段落不能套 docDefaults 的字体，否则标题会跟着正文变。
+const THEME_FONT_ATTRS = ['w:asciiTheme', 'w:hAnsiTheme', 'w:eastAsiaTheme', 'w:cstheme']
+
+function fontFromRPr (rPr) {
+  const fonts = directChild(rPr, 'w:rFonts')
+  if (!fonts) return undefined
+  const name = fonts.getAttribute('w:eastAsia') || fonts.getAttribute('w:ascii')
+  if (name) return name.trim()
+  if (THEME_FONT_ATTRS.some((attr) => fonts.hasAttribute(attr))) return null
+  return undefined
+}
+
+function loadStyleModel (xmlText) {
+  const model = { styles: new Map(), defaults: null, defaultId: null }
+  if (!xmlText) return model
+  const xml = new DOMParser().parseFromString(xmlText, 'application/xml')
+  const defaults = xml.getElementsByTagName('w:docDefaults')[0]
+  model.defaults = fontFromRPr(directChild(directChild(defaults, 'w:rPrDefault'), 'w:rPr')) || null
+  for (const style of Array.from(xml.getElementsByTagName('w:style'))) {
+    const id = style.getAttribute('w:styleId')
+    if (!id) continue
+    model.styles.set(id, {
+      basedOn: directChild(style, 'w:basedOn')?.getAttribute('w:val') || null,
+      font: fontFromRPr(directChild(style, 'w:rPr')),
+      defaultParagraph: style.getAttribute('w:type') === 'paragraph' && style.getAttribute('w:default') === '1'
+    })
+  }
+  for (const [id, style] of model.styles) {
+    if (!style.defaultParagraph) continue
+    model.defaultId = id
+    break
+  }
+  if (!model.defaultId && model.styles.has('Normal')) model.defaultId = 'Normal'
+  return model
+}
+
+// 段落里没写 rFonts 的 run 用这个字体：沿 pStyle → basedOn 链找第一个写了字体的样式；
+// 链上是主题字体说明跟随主题，返回 null（不处理）；整条链都没写字体才回落 docDefaults。
+function paragraphFont (paragraph, options) {
+  const model = options?.styleModel
+  if (!model) return null
+  let id = directChild(directChild(paragraph, 'w:pPr'), 'w:pStyle')?.getAttribute('w:val') || model.defaultId
+  const seen = new Set()
+  while (id && !seen.has(id)) {
+    seen.add(id)
+    const style = model.styles.get(id)
+    if (!style) break
+    if (style.font === null) return null
+    if (style.font) return resolveRunFont(style.font, options)
+    id = style.basedOn
+  }
+  return model.defaults ? resolveRunFont(model.defaults, options) : null
+}
+
 // DOCX 里只写一个字体名，导入时交给调用方的解析函数映射回下拉框的整串字体栈；
 // 解析不到（不是内置字体）就原样保留，屏幕上按原字体名显示。
 function resolveRunFont (name, options) {
+  const cache = options?.fontCache
+  if (cache?.has(name)) return cache.get(name)
   const value = typeof options?.resolveFontFamily === 'function' ? options.resolveFontFamily(name) : null
-  return value || name
+  const resolved = value || name
+  if (cache) cache.set(name, resolved)
+  return resolved
 }
 
-function inlineRunStyle (properties, options) {
-  if (!properties) return null
+// inheritedFont 是段落样式的继承字体（已解析成字体栈），run 自己没写显式字体时才用它
+function inlineRunStyle (properties, options, inheritedFont) {
+  const inherited = inheritedFont || null
+  if (!properties) return inherited ? { color: null, highlight: null, font: inherited } : null
   let color = null
   const colorValue = directChild(properties, 'w:color')?.getAttribute('w:val')
   if (/^[0-9a-f]{6}$/i.test(colorValue || '')) color = `#${colorValue.toLowerCase()}`
@@ -391,17 +453,20 @@ function inlineRunStyle (properties, options) {
     }
   }
   // 字体优先取东亚字体，没有就取西文；只写主题字体（w:asciiTheme 等）的跟随主题，不处理
-  let font = null
+  let font = inherited
   const fonts = directChild(properties, 'w:rFonts')
-  const fontName = fonts?.getAttribute('w:eastAsia') || fonts?.getAttribute('w:ascii')
-  if (fontName) font = resolveRunFont(fontName.trim(), options)
+  if (fonts) {
+    const fontName = fonts.getAttribute('w:eastAsia') || fonts.getAttribute('w:ascii')
+    if (fontName) font = resolveRunFont(fontName.trim(), options)
+    else if (THEME_FONT_ATTRS.some((attr) => fonts.hasAttribute(attr))) font = null
+  }
   return color || highlight || font ? { color, highlight, font } : null
 }
 
-function styleForTextNode (node, options) {
+function styleForTextNode (node, options, inheritedFont) {
   let current = node.parentNode
   while (current) {
-    if (current.nodeName === 'w:r') return inlineRunStyle(directChild(current, 'w:rPr'), options)
+    if (current.nodeName === 'w:r') return inlineRunStyle(directChild(current, 'w:rPr'), options, inheritedFont)
     if (current.nodeName === 'w:p') return null
     current = current.parentNode
   }
@@ -414,14 +479,16 @@ function paragraphRunSegments (xml, options) {
   for (const paragraph of Array.from(xml.getElementsByTagName('w:p'))) {
     const segments = []
     let rewritten = false
+    // 每个段落先算出继承字体，段内所有 run 共用
+    const inheritedFont = paragraphFont(paragraph, options)
     const walk = (element) => {
       for (const child of Array.from(element.children || [])) {
         const name = child.nodeName
         if (RUN_TEXT_SKIP.has(name)) continue
-        if (name === 'w:t') segments.push({ text: child.textContent || '', style: styleForTextNode(child, options) })
-        else if (name === 'w:tab') segments.push({ text: '\t', style: styleForTextNode(child, options) })
-        else if (name === 'w:noBreakHyphen') segments.push({ text: '\u2011', style: styleForTextNode(child, options) })
-        else if (name === 'w:softHyphen') segments.push({ text: '\u00AD', style: styleForTextNode(child, options) })
+        if (name === 'w:t') segments.push({ text: child.textContent || '', style: styleForTextNode(child, options, inheritedFont) })
+        else if (name === 'w:tab') segments.push({ text: '\t', style: styleForTextNode(child, options, inheritedFont) })
+        else if (name === 'w:noBreakHyphen') segments.push({ text: '\u2011', style: styleForTextNode(child, options, inheritedFont) })
+        else if (name === 'w:softHyphen') segments.push({ text: '\u00AD', style: styleForTextNode(child, options, inheritedFont) })
         else if (RUN_TEXT_REWRITE.has(name)) rewritten = true
         else walk(child)
       }
@@ -610,6 +677,9 @@ export async function docxBase64ToJSON (base64, extensions, options = {}) {
   const zip = await JSZip.loadAsync(base64ToBytes(base64))
   const file = zip.file('word/document.xml')
   const xml = file ? await file.async('string') : ''
+  const stylesFile = zip.file('word/styles.xml')
+  const styleModel = loadStyleModel(stylesFile ? await stylesFile.async('string') : '')
+  const importOptions = { ...options, styleModel, fontCache: new Map() }
   let marked = ''
   if (file) {
     marked = xml
@@ -619,7 +689,7 @@ export async function docxBase64ToJSON (base64, extensions, options = {}) {
   }
   const converted = await zip.generateAsync({ type: 'uint8array' })
   const result = await mammoth.convertToHtml({ arrayBuffer: converted.buffer })
-  const html = marked ? injectRunStyles(result.value, new DOMParser().parseFromString(marked, 'application/xml'), options) : result.value
+  const html = marked ? injectRunStyles(result.value, new DOMParser().parseFromString(marked, 'application/xml'), importOptions) : result.value
   const json = generateJSON(html, extensions)
   normalizeRunFonts(json, options)
   normalizeRunColors(json)
