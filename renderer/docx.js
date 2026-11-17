@@ -200,7 +200,15 @@ function applyParagraphStyles (json, xml) {
   })
 }
 
-function imageStylesFromXml (xml) {
+// 文档里出现过的、简写不支持的环绕方式（只提示一次）
+const SIMPLIFIED_WRAP_LABELS = {
+  wrapTight: '紧密型',
+  wrapThrough: '穿越型',
+  wrapNone: '浮于或衬于文字',
+  behindDoc: '衬于文字下方'
+}
+
+function imageStylesFromXml (xml, simplified) {
   const styles = []
   for (const drawing of Array.from(xml.getElementsByTagName('w:drawing'))) {
     const extent = drawing.getElementsByTagName('wp:extent')[0]
@@ -219,17 +227,35 @@ function imageStylesFromXml (xml) {
     const jc = directChild(directChild(paragraph, 'w:pPr'), 'w:jc')?.getAttribute('w:val')
     const positionH = anchor?.getElementsByTagName('wp:positionH')[0]
     const align = positionH?.getElementsByTagName('wp:align')[0]?.textContent
-    const hasWrap = ['wp:wrapSquare', 'wp:wrapTight', 'wp:wrapThrough']
-      .some((name) => drawing.getElementsByTagName(name).length > 0)
     const style = {
       width: width || null,
       height: height || null,
       crop
     }
     if (anchor) {
-      if (hasWrap && ['left', 'right'].includes(align)) style.wrap = align
-      if (['center', 'right'].includes(jc)) style.align = jc
-      else if (!hasWrap && ['center', 'right'].includes(align)) style.align = align
+      const topBottom = drawing.getElementsByTagName('wp:wrapTopAndBottom').length > 0
+      const square = drawing.getElementsByTagName('wp:wrapSquare').length > 0
+      const tight = drawing.getElementsByTagName('wp:wrapTight').length > 0
+      const through = drawing.getElementsByTagName('wp:wrapThrough').length > 0
+      const wrapNone = drawing.getElementsByTagName('wp:wrapNone').length > 0
+      const behindDoc = anchor.getAttribute('behindDoc') === '1' || anchor.getAttribute('behindDoc') === 'true'
+      if (topBottom) {
+        // 上下型：水平位置读 wp:positionH/wp:align（左/中/右）
+        style.wrap = 'topBottom'
+        if (['center', 'right'].includes(align)) style.align = align
+        else if (align === 'left') style.align = 'left'
+        else if (['center', 'right'].includes(jc)) style.align = jc
+      } else if (square || tight || through) {
+        if (['left', 'right'].includes(align)) style.wrap = align
+        if (tight || through) simplified?.add('wrapTight')
+      } else if (wrapNone || behindDoc) {
+        simplified?.add(behindDoc ? 'behindDoc' : 'wrapNone')
+      }
+      // topBottom 以 wp:positionH 为准，段落 jc 只在没有位置对齐时兜底
+      if (!topBottom) {
+        if (['center', 'right'].includes(jc)) style.align = jc
+        else if (!square && !tight && !through && ['center', 'right'].includes(align)) style.align = align
+      }
     } else if (['center', 'right'].includes(jc)) {
       style.align = jc
     }
@@ -238,8 +264,8 @@ function imageStylesFromXml (xml) {
   return styles
 }
 
-function applyImageStyles (json, xml) {
-  const styles = imageStylesFromXml(xml)
+function applyImageStyles (json, xml, simplified) {
+  const styles = imageStylesFromXml(xml, simplified)
   if (!styles.length) return
   let index = 0
   walkJson(json, (node) => {
@@ -693,17 +719,25 @@ export async function docxBase64ToJSON (base64, extensions, options = {}) {
   const json = generateJSON(html, extensions)
   normalizeRunFonts(json, options)
   normalizeRunColors(json)
+  const simplifiedWraps = new Set()
   if (xml) {
     const xmlDocument = new DOMParser().parseFromString(xml, 'application/xml')
     applyParagraphStyles(json, xmlDocument)
-    applyImageStyles(json, xmlDocument)
+    applyImageStyles(json, xmlDocument, simplifiedWraps)
     applyTableStyles(json, xmlDocument)
   }
   json.content = restorePageBreaks(json.content)
+  const warnings = result.messages.map((message) => message.message)
+  if (simplifiedWraps.size) {
+    const labels = [...simplifiedWraps].map((kind) => SIMPLIFIED_WRAP_LABELS[kind] || kind).join('、')
+    warnings.push(`部分图片的环绕方式已简化（${labels} → 四周型/嵌入型）`)
+  }
   return {
     json,
     pageSetup: xml ? readPageSetup(xml) : null,
-    warnings: result.messages.map((message) => message.message)
+    warnings,
+    // 给 app.js 直接显示用；没有简化时为空
+    wrapNotice: simplifiedWraps.size ? '部分图片的环绕方式已简化' : null
   }
 }
 
@@ -788,19 +822,27 @@ async function imageRun (node) {
   }
   width = Math.max(1, Math.round(width))
   height = Math.max(1, Math.round(height))
-  const floating = ['left', 'right'].includes(attrs.wrap)
+  // 左右 = 四周型（SQUARE）；topBottom = 上下型，按 align 定水平位置
+  const align = { center: HorizontalPositionAlign.CENTER, right: HorizontalPositionAlign.RIGHT }[attrs.align] || HorizontalPositionAlign.LEFT
+  const floating = attrs.wrap === 'topBottom'
     ? {
-        horizontalPosition: {
-          relative: HorizontalPositionRelativeFrom.COLUMN,
-          align: attrs.wrap === 'left' ? HorizontalPositionAlign.LEFT : HorizontalPositionAlign.RIGHT
-        },
-        verticalPosition: {
-          relative: VerticalPositionRelativeFrom.PARAGRAPH,
-          align: VerticalPositionAlign.TOP
-        },
-        wrap: { type: TextWrappingType.SQUARE, side: TextWrappingSide.BOTH_SIDES }
+        horizontalPosition: { relative: HorizontalPositionRelativeFrom.COLUMN, align },
+        verticalPosition: { relative: VerticalPositionRelativeFrom.PARAGRAPH, align: VerticalPositionAlign.TOP },
+        wrap: { type: TextWrappingType.TOP_AND_BOTTOM }
       }
-    : undefined
+    : ['left', 'right'].includes(attrs.wrap)
+      ? {
+          horizontalPosition: {
+            relative: HorizontalPositionRelativeFrom.COLUMN,
+            align: attrs.wrap === 'left' ? HorizontalPositionAlign.LEFT : HorizontalPositionAlign.RIGHT
+          },
+          verticalPosition: {
+            relative: VerticalPositionRelativeFrom.PARAGRAPH,
+            align: VerticalPositionAlign.TOP
+          },
+          wrap: { type: TextWrappingType.SQUARE, side: TextWrappingSide.BOTH_SIDES }
+        }
+      : undefined
   return new ImageRun({
     data: base64ToBytes(match[2]),
     transformation: { width, height },

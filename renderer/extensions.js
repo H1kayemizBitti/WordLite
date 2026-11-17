@@ -1,6 +1,6 @@
 // 自定义 TipTap 扩展：缩进、段距、字距、行距、字号、上下标、图片、表格
 // Word 的语义是"段落/字符属性"，官方扩展没有现成的，按需自行实现
-import { Extension, Mark, Node } from '@tiptap/core'
+import { Extension, Mark, Node, ResizableNodeView, getRenderedAttributes, mergeAttributes } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { Image as BaseImage } from '@tiptap/extension-image'
@@ -277,6 +277,56 @@ function imageCrop (attrs) {
   }
 }
 
+// Word 式"外框 = 可见区域"：width/height 是可见区域的显示尺寸，
+// 内部 img 放大到 宽/(1-左右裁剪) 并向上向左偏移，多出来的部分被外框裁掉。
+// 没有显式尺寸的旧数据退回原图自然尺寸。
+export function imageCropFrame (attrs, natural = null) {
+  const crop = imageCrop(attrs)
+  const hasCrop = !!(crop.top || crop.right || crop.bottom || crop.left)
+  const visibleX = Math.max(0.05, 1 - (crop.left + crop.right) / 100)
+  const visibleY = Math.max(0.05, 1 - (crop.top + crop.bottom) / 100)
+  const width = Number(attrs.width) || null
+  const height = Number(attrs.height) || null
+  const frame = {
+    crop,
+    hasCrop,
+    width: null,
+    height: null,
+    innerWidth: null,
+    innerHeight: null,
+    left: 0,
+    top: 0
+  }
+  if (width) {
+    frame.width = Math.max(1, Math.round(width))
+    frame.innerWidth = Math.max(1, Math.round(frame.width / visibleX))
+  } else if (natural?.width) {
+    frame.innerWidth = natural.width
+    if (hasCrop) frame.width = Math.max(1, Math.round(frame.innerWidth * visibleX))
+  }
+  if (height) {
+    frame.height = Math.max(1, Math.round(height))
+    frame.innerHeight = Math.max(1, Math.round(frame.height / visibleY))
+  } else if (natural?.height) {
+    frame.innerHeight = natural.height
+    if (hasCrop) frame.height = Math.max(1, Math.round(frame.innerHeight * visibleY))
+  }
+  if (frame.innerWidth) frame.left = -Math.round(frame.innerWidth * crop.left / 100)
+  if (frame.innerHeight) frame.top = -Math.round(frame.innerHeight * crop.top / 100)
+  return frame
+}
+
+const IMAGE_DATA_ATTRS = [
+  'data-align',
+  'data-wrap',
+  'data-crop-top',
+  'data-crop-right',
+  'data-crop-bottom',
+  'data-crop-left',
+  'title',
+  'alt'
+]
+
 // 图片：精确宽高、对齐、文字环绕、裁剪；保留官方拖拽缩放
 export const WordImage = BaseImage.extend({
   addAttributes () {
@@ -302,7 +352,7 @@ export const WordImage = BaseImage.extend({
       wrap: {
         default: null,
         parseHTML: (el) => el.getAttribute('data-wrap') || null,
-        renderHTML: (attrs) => ['left', 'right'].includes(attrs.wrap)
+        renderHTML: (attrs) => ['left', 'right', 'topBottom'].includes(attrs.wrap)
           ? { 'data-wrap': attrs.wrap }
           : {}
       },
@@ -318,16 +368,113 @@ export const WordImage = BaseImage.extend({
         }),
         renderHTML: (attrs) => {
           const crop = imageCrop(attrs)
-          const hasCrop = crop.top || crop.right || crop.bottom || crop.left
           return {
             'data-crop-top': crop.top,
             'data-crop-right': crop.right,
             'data-crop-bottom': crop.bottom,
-            'data-crop-left': crop.left,
-            style: hasCrop ? `clip-path:inset(${crop.top}% ${crop.right}% ${crop.bottom}% ${crop.left}%)` : ''
+            'data-crop-left': crop.left
           }
         }
       }
+    }
+  },
+
+  // img 不再直接做缩放容器：外层 box 承载可见区域尺寸并 overflow:hidden，
+  // 对齐 / 环绕标记仍放在 img 上，沿用 style.css 里 :has(img[...]) 的规则。
+  addNodeView () {
+    if (!this.options.resize || !this.options.resize.enabled || typeof document === 'undefined') return null
+    const { directions, minWidth, minHeight, alwaysPreserveAspectRatio } = this.options.resize
+    return ({ node, getPos, HTMLAttributes, editor }) => {
+      const box = document.createElement('div')
+      box.style.display = 'inline-block'
+      box.style.verticalAlign = 'top'
+      box.style.overflow = 'hidden'
+      box.style.lineHeight = '0'
+      box.style.boxSizing = 'border-box'
+      box.style.maxWidth = '100%'
+      const el = document.createElement('img')
+      el.draggable = false
+      box.appendChild(el)
+
+      const mergedAttributes = mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)
+      const syncImageSource = (src) => {
+        if (typeof src === 'string' && src !== '') {
+          if (el.getAttribute('src') !== src) el.src = src
+          return
+        }
+        if (el.hasAttribute('src')) el.removeAttribute('src')
+      }
+      const natural = () => ({
+        width: el.naturalWidth || null,
+        height: el.naturalHeight || null
+      })
+      let nodeView = null
+      const syncFrame = (attrs) => {
+        const frame = imageCropFrame(attrs, natural())
+        box.style.width = frame.width ? `${frame.width}px` : ''
+        box.style.height = frame.height ? `${frame.height}px` : ''
+        el.style.width = frame.innerWidth ? `${frame.innerWidth}px` : 'auto'
+        el.style.height = frame.innerHeight ? `${frame.innerHeight}px` : 'auto'
+        // style.css 里 img 的 max-width:100% 会把放大后的图缩回去，这里覆盖掉
+        el.style.maxWidth = frame.hasCrop || frame.innerWidth ? 'none' : ''
+        el.style.transform = frame.hasCrop ? `translate(${frame.left}px, ${frame.top}px)` : ''
+        // topBottom：块级、整行；align 交给 style.css 的 :has 规则
+        if (nodeView) nodeView.dom.style.clear = attrs.wrap === 'topBottom' ? 'both' : ''
+      }
+      const syncAttributes = (attributes) => {
+        for (const key of IMAGE_DATA_ATTRS) {
+          const value = attributes[key]
+          if (value == null) el.removeAttribute(key)
+          else el.setAttribute(key, value)
+        }
+        syncImageSource(attributes.src)
+      }
+
+      syncAttributes(mergedAttributes)
+      syncFrame(node.attrs)
+
+      const onUpdate = (updatedNode) => {
+        if (updatedNode.type !== node.type) return false
+        const extensionAttributes = editor.extensionManager.attributes.filter((attribute) => attribute.type === updatedNode.type.name)
+        syncAttributes(getRenderedAttributes(updatedNode, extensionAttributes))
+        syncFrame(updatedNode.attrs)
+        return true
+      }
+
+      nodeView = new ResizableNodeView({
+        element: box,
+        editor,
+        node,
+        getPos,
+        onResize: (width, height) => {
+          syncFrame({ ...node.attrs, width, height })
+        },
+        onCommit: (width, height) => {
+          const pos = getPos()
+          if (pos === void 0) return
+          this.editor.chain().setNodeSelection(pos).updateAttributes(this.name, { width, height }).run()
+        },
+        onUpdate,
+        options: {
+          directions,
+          min: { width: minWidth, height: minHeight },
+          preserveAspectRatio: alwaysPreserveAspectRatio === true
+        }
+      })
+      syncFrame(node.attrs)
+      const dom = nodeView.dom
+      const showNodeView = () => {
+        dom.style.visibility = ''
+        dom.style.pointerEvents = ''
+      }
+      dom.style.visibility = 'hidden'
+      dom.style.pointerEvents = 'none'
+      if (el.complete && el.naturalWidth > 0) showNodeView()
+      else {
+        el.onload = showNodeView
+        el.onerror = showNodeView
+      }
+      return nodeView
     }
   }
 })
