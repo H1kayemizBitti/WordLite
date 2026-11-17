@@ -48,7 +48,7 @@
     closeAfterSave: () => invoke('close_after_save'),
     // 关闭确认里选了「取消」：通知 Rust 中止退出流程；Windows 上该命令什么也不做
     closeCancelled: () => invoke('close_cancelled'),
-    print: (options = {}) => invoke('print_document', { options }),
+    print: () => invoke('print_document'),
     exportPdf: (defaultPath) => invoke('export_pdf', { defaultPath, page: pageMetrics() }),
     printToPDF: () => invoke('print_to_pdf', { page: pageMetrics() }),
     onSaveBeforeClose: (callback) => {

@@ -1068,51 +1068,7 @@ body.file-drag-over::after {
 
 .help-about-meta > span:nth-child(odd) { color: var(--text-dim); }
 
-/* ---------- 打印预览 ---------- */
-
-.preview-dialog { width: min(940px, 94vw); height: min(90vh, 980px); max-height: 92vh; }
-.preview-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--border);
-  flex: none;
-  font-size: 12.5px;
-  color: #4b5563;
-}
-.preview-toolbar .text-input { width: 180px; }
-.preview-toolbar .short-input { width: 60px; }
-.field-error { color: #b42318; font-size: 11px; }
-.text-input.invalid { border-color: #b42318; box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.12); }
-.preview-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 22px;
-  background: var(--bg-workspace);
-}
-.preview-pages { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.preview-label { font-size: 11px; color: var(--text-dim); }
-.preview-page {
-  box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.05), 0 6px 18px rgba(16, 24, 40, 0.12);
-  flex: none;
-  overflow: hidden;
-  print-color-adjust: exact;
-  -webkit-print-color-adjust: exact;
-}
-.preview-page .ProseMirror { min-height: 0; }
-.preview-page .page-break { display: none; }
-.preview-page .column-resize-handle { display: none; }
-.preview-meta {
-  padding: 7px 20px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-dim);
-  flex: none;
-}
-.preview-dialog .dialog-foot .dialog-note { max-width: 48%; }
+/* ---------- 打印 ---------- */
 
 @media print {
   dialog, #contextMenu { display: none !important; }
@@ -1157,13 +1113,14 @@ body.file-drag-over::after {
   .ProseMirror ::selection { background: transparent !important; }
   .ProseMirror::selection { background: transparent !important; }
   .ProseMirror-gapcursor { display: none !important; }
-  /* 预览按“整段不拆页”分页；打印/PDF 也必须按整段分页，两边页数才对得上
-     （以前 PDF 会把段落拆到两页，每页多塞半段，页数比预览少）。
+  /* 按“整段不拆页”分页。
      orphans/widows 设成 2 是第二道保险：就算 WebKit 忽略了 break-inside，
      两行、三行的段落也没法拆成 1+1 或 1+2，仍然整段走。 */
   .ProseMirror > * { break-inside: avoid; page-break-inside: avoid; }
   .ProseMirror { orphans: 2; widows: 2; }
   .ProseMirror table, .ProseMirror img { break-inside: avoid; page-break-inside: avoid; }
+  /* 图片缩放手柄和选中框也不能印出来 */
+  .ProseMirror [data-resize-handle] { display: none !important; }
   .find-bar { display: none !important; }
   .ProseMirror .find-match { background: transparent !important; box-shadow: none !important; }
 }

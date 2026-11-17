@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 
 const PREFIX = '[selftest] '
-const REQUIRED_BOOL = ['bridge', 'tauri', 'editor', 'openedNewWindow', 'blankDragOk', 'contextMenuOk']
+const REQUIRED_BOOL = ['bridge', 'tauri', 'editor', 'openedNewWindow', 'blankDragOk', 'contextMenuOk', 'printPreviewRemoved']
 const REQUIRED_VALUE = {
   state: 'ok',
   read: 'hello',
@@ -62,10 +62,9 @@ function main () {
     if (results.pdfHeader !== '%PDF') {
       problems.push(`pdfHeader 应为 "%PDF"，实际 ${JSON.stringify(results.pdfHeader)}`)
     }
-    if (results.longPdfPages !== results.previewPages) {
-      problems.push(
-        `longPdfPages (${results.longPdfPages}) 与 previewPages (${results.previewPages}) 不一致`
-      )
+    // V2：自定义预览已删除，不再有 previewPages；长文档导出 PDF 至少两页即为分页成功
+    if (!(results.longPdfPages >= 2)) {
+      problems.push(`longPdfPages 应 ≥ 2，实际 ${JSON.stringify(results.longPdfPages)}`)
     }
   }
 

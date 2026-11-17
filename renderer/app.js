@@ -1313,7 +1313,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (key === 'p') {
     e.preventDefault()
-    openPrintPreview()
+    directPrint()
     return
   }
   if (e.code === 'Enter') {
@@ -1538,7 +1538,12 @@ function applyPageSetup () {
     const id = `#margin${side[0].toUpperCase()}${side.slice(1)}`
     document.querySelector(id).value = margins[side]
   }
-  document.querySelector('#printPageStyle').textContent = `@page { size: ${dimensions.width}cm ${dimensions.height}cm; margin: ${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm; }`
+  // 显式声明空的页边距盒子：Chromium/WebView2 只要看到 @page 里有页边距盒子，
+  // 就不再画自己的页眉页脚（否则会印出日期、标题和 tauri.localhost 网址）。
+  document.querySelector('#printPageStyle').textContent =
+    `@page { size: ${dimensions.width}cm ${dimensions.height}cm; margin: ${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm; ` +
+    '@top-left { content: ""; } @top-center { content: ""; } @top-right { content: ""; } ' +
+    '@bottom-left { content: ""; } @bottom-center { content: ""; } @bottom-right { content: ""; } }'
 }
 
 function setPageSetup (patch) {
@@ -2412,176 +2417,64 @@ replaceInput.addEventListener('keydown', (e) => {
 
 new ResizeObserver(positionFindBar).observe(document.querySelector('#ribbon'))
 
-/* ---------------- 打印预览与 PDF ---------------- */
+/* ---------------- 打印与 PDF ---------------- */
 
-const printPreviewDialog = document.querySelector('#printPreviewDialog')
-let previewPages = 0
+// Ctrl+P / 功能区「打印」/ Mac 菜单都走这里：一步到 WebView2 原生打印页。
+// 原生页有自己的预览、页码、份数、打印机和真实页数，简写不再自己排一遍。
+let printing = false
+let printRestoreFocus = false
+let printFallbackTimer = 0
 
-function createPreviewPage () {
-  const dims = pageDimensions()
-  const margins = currentMargins()
-  const page = document.createElement('div')
-  page.className = 'preview-page'
-  page.style.width = `${dims.width}cm`
-  page.style.minHeight = `${dims.height}cm`
-  page.style.padding = `${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm`
-  page.style.background = pageSetup.background
-  const body = document.createElement('div')
-  body.className = 'ProseMirror preview-content'
-  body.contentEditable = 'false'
-  page.appendChild(body)
-  return { page, body }
+function endPrint () {
+  if (printFallbackTimer) {
+    clearTimeout(printFallbackTimer)
+    printFallbackTimer = 0
+  }
+  if (!printing) return
+  printing = false
+  if (printRestoreFocus) {
+    printRestoreFocus = false
+    editor.commands.focus()
+  }
 }
 
-// 按内容实际高度分页：分页符强制换页，其余内容装不下就自动开新页
-function paginatePreview (clone, contentWidth, contentHeight) {
-  const measurer = document.createElement('div')
-  measurer.className = 'ProseMirror preview-content'
-  measurer.style.position = 'fixed'
-  measurer.style.left = '-100000px'
-  measurer.style.top = '0'
-  measurer.style.width = `${contentWidth}px`
-  measurer.style.minHeight = '0'
-  measurer.style.visibility = 'hidden'
-  measurer.style.pointerEvents = 'none'
-  document.body.appendChild(measurer)
+// 原生打印页关闭（或在 Mac 上根本不发 afterprint）时把状态复位
+window.addEventListener('afterprint', endPrint)
 
-  const pages = []
-  let current = []
-  const flush = () => {
-    if (current.length) {
-      pages.push(current)
-      current = []
-      measurer.textContent = ''
-    }
-  }
-
-  for (const node of Array.from(clone.childNodes)) {
-    if (node.nodeType === 1 && node.matches('.page-break')) {
-      flush()
-      continue
-    }
-    measurer.appendChild(node)
-    if (measurer.getBoundingClientRect().height > contentHeight && current.length) {
-      // 当前页放不下这个块：把它挪到新的一页
-      measurer.removeChild(node)
-      pages.push(current)
-      current = []
-      measurer.textContent = ''
-      measurer.appendChild(node)
-    }
-    current.push(node)
-  }
-  flush()
-  measurer.remove()
-
-  const result = []
-  for (const nodes of pages.length ? pages : [[]]) {
-    const { page, body } = createPreviewPage()
-    for (const node of nodes) body.appendChild(node)
-    page.appendChild(body)
-    result.push(page)
-  }
-  return result
-}
-
-function renderPrintPreview () {
-  const container = document.querySelector('#previewPages')
-  container.innerHTML = ''
-  const clone = editor.view.dom.cloneNode(true)
-  clone.removeAttribute('contenteditable')
-  clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'))
-  clone.querySelectorAll('.ProseMirror-selectednode').forEach((el) => el.classList.remove('ProseMirror-selectednode'))
-  clone.querySelectorAll('.ProseMirror-gapcursor').forEach((el) => el.remove())
-  clone.querySelectorAll('.column-resize-handle').forEach((el) => el.remove())
-  clone.querySelectorAll('.is-editor-empty').forEach((el) => el.classList.remove('is-editor-empty'))
-  // 查找高亮不进入打印预览
-  clone.querySelectorAll('.find-match').forEach((el) => el.replaceWith(...el.childNodes))
-
-  const dims = pageDimensions()
-  const margin = currentMargins()
-  const pxPerCm = 37.7952756
-  // 正文可用高度要和打印页框完全一致：@page 的页边距吃掉的正好是 (页高 - 上下边距)，
-  // 之前多减 2px 会让某些块的边缘判断和 PDF 排版差一像素，页数就可能差 1。
-  const pages = paginatePreview(
-    clone,
-    (dims.width - margin.left - margin.right) * pxPerCm,
-    (dims.height - margin.top - margin.bottom) * pxPerCm
-  )
-  for (const [index, item] of pages.entries()) {
-    const label = document.createElement('div')
-    label.className = 'preview-label'
-    label.textContent = `第 ${index + 1} 页`
-    container.append(label, item)
-  }
-  previewPages = pages.length
-
-  const scroll = document.querySelector('#previewScroll')
-  const available = Math.max(260, scroll.clientWidth - 36)
-  const zoom = Math.min(1, available / (dims.width * pxPerCm))
-  for (const item of pages) item.style.zoom = String(zoom)
-  document.querySelector('#previewMeta').textContent =
-    `${pageSetup.size.toUpperCase()} · ${pageSetup.orientation === 'portrait' ? '纵向' : '横向'} · 页边距 ${margin.top}/${margin.right}/${margin.bottom}/${margin.left} cm · ${previewPages} 页（自动分页）`
-}
-
-document.querySelector('#previewPageSize').addEventListener('change', (e) => {
-  setPageSetup({ size: e.target.value })
-  renderPrintPreview()
-})
-
-document.querySelector('#previewOrientation').addEventListener('change', (e) => {
-  setPageSetup({ orientation: e.target.value })
-  renderPrintPreview()
-})
-
-function openPrintPreview () {
-  if (!printPreviewDialog.open) printPreviewDialog.showModal()
-  renderPrintPreview()
-  document.querySelector('#previewPageSize').value = pageSetup.size
-  document.querySelector('#previewOrientation').value = pageSetup.orientation
-  document.querySelector('#printPageRanges').value = ''
-  document.querySelector('#printPageRanges').classList.remove('invalid')
-  document.querySelector('#printCopies').value = '1'
-  document.querySelector('#printRangeError').textContent = ''
-  // 对话框刚显示时容器宽度可能还没稳定，下一帧按真实宽度再排一次
-  requestAnimationFrame(renderPrintPreview)
-}
-
-document.querySelector('#btnPrint').addEventListener('click', openPrintPreview)
-document.querySelector('#btnPrintPreview').addEventListener('click', openPrintPreview)
-document.querySelector('#btnCancelPrint').addEventListener('click', () => printPreviewDialog.close())
-
-document.querySelector('#printPageRanges').addEventListener('input', (e) => {
-  document.querySelector('#printRangeError').textContent = ''
-  e.target.classList.remove('invalid')
-})
-
-document.querySelector('#btnDoPrint').addEventListener('click', async () => {
-  const rangeText = document.querySelector('#printPageRanges').value.trim()
-  const rangeError = document.querySelector('#printRangeError')
-  if (rangeText && !/^\d+(\s*-\s*\d+)?(\s*,\s*\d+(\s*-\s*\d+)?)*$/.test(rangeText)) {
-    rangeError.textContent = '页码格式示例：1-3,5'
-    document.querySelector('#printPageRanges').classList.add('invalid')
+async function directPrint () {
+  // 原生打印页开着时 window.print() 是阻塞的，printing 标志挡住重复调用
+  if (printing || document.querySelector('dialog[open]')) return
+  printing = true
+  printRestoreFocus = editor.view.hasFocus()
+  try {
+    await clearPrintFocus()
+  } catch (error) {
+    printing = false
+    printRestoreFocus = false
+    console.error(error)
     return
   }
-  if (rangeText) {
-    const invalidBounds = rangeText.split(',').some((part) => {
-      const [fromText, toText] = part.trim().split(/\s*-\s*/)
-      const from = Number(fromText)
-      const to = toText === undefined ? from : Number(toText)
-      return from < 1 || to < from
-    })
-    if (invalidBounds) {
-      rangeError.textContent = '页码需从 1 开始，且起始页不能大于结束页'
-      document.querySelector('#printPageRanges').classList.add('invalid')
-      return
-    }
+  try {
+    // Windows 上 eval("window.print()") 是异步返回的，afterprint 才是关闭信号；
+    // Mac 的 NSPrintPanel 可能不发 afterprint，3 秒后兜底复位，避免永远卡住
+    await fileApi.print()
+    printFallbackTimer = setTimeout(endPrint, 3000)
+  } catch (error) {
+    console.error(error)
+    endPrint()
+    showStatus('无法打开打印窗口，请更新 WebView2 运行时，或改用「导出 PDF」', 0)
   }
-  const copies = Math.round(clamp(document.querySelector('#printCopies').value, 1, 99, 1))
-  // 先失焦再打印，否则编辑光标/选区可能跟着画进 PDF
-  await clearPrintFocus()
-  fileApi.print({ pageRanges: rangeText, copies })
-  printPreviewDialog.close()
+}
+
+document.querySelector('#btnPrint').addEventListener('click', directPrint)
+
+// 兜底：以后若有入口绕过 directPrint 直接触发 window.print()，输出里也不该有光标和选区。
+// directPrint 自己也会触发 beforeprint，此时不能再记一次焦点（焦点已经被 clearPrintFocus 移走了）
+window.addEventListener('beforeprint', () => {
+  if (printing) return
+  printing = true
+  printRestoreFocus = editor.view.hasFocus()
+  clearPrintFocus().catch(() => {})
 })
 
 // 打印/导出 PDF 前先让编辑器失焦并清掉选区：WKWebView 会把编辑光标和选区高亮
@@ -2635,8 +2528,7 @@ const MENU_COMMANDS = {
   save: () => saveDocument(),
   saveAs: () => saveDocument(true),
   exportPdf: () => exportPdf(),
-  print: () => openPrintPreview(),
-  printPreview: () => openPrintPreview(),
+  print: () => directPrint(),
   undo: () => runHistory('undo'),
   redo: () => runHistory('redo'),
   find: () => openFind('find'),

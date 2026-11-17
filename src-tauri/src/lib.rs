@@ -653,9 +653,8 @@ fn close_after_save(window: tauri::WebviewWindow, state: State<AppState>) -> Res
 }
 
 // 打印走系统打印面板；macOS 用 WKWebView 自带的打印（eval window.print() 在 WKWebView 里不弹面板）
-#[tauri::command(rename_all = "camelCase")]
-fn print_document(window: tauri::WebviewWindow, options: serde_json::Value) -> Result<(), String> {
-    let _ = options;
+#[tauri::command]
+fn print_document(window: tauri::WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         window.print().map_err(|e| e.to_string())
@@ -1038,14 +1037,13 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
     }
     // 系统自带项（关于/服务/隐藏/剪切/复制/粘贴/全选/最小化…）由 AppKit 自己处理，
     // 只把约定里的 id 转发给渲染层
-    const COMMAND_IDS: [&str; 12] = [
+    const COMMAND_IDS: [&str; 11] = [
         "new",
         "open",
         "save",
         "saveAs",
         "exportPdf",
         "print",
-        "printPreview",
         "undo",
         "redo",
         "find",
@@ -1101,7 +1099,6 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&custom(app, "exportPdf", "导出 PDF…", None)?)
         .separator()
         .item(&custom(app, "print", "打印…", Some("CmdOrCtrl+P"))?)
-        .item(&custom(app, "printPreview", "打印预览", None)?)
         .build()?;
 
     let edit_menu = SubmenuBuilder::new(app, "编辑")
@@ -1354,6 +1351,11 @@ pub fn run() {
                             results.tauri = !!window.__TAURI__;
                             results.editor = !!editorEl;
                             results.findBar = !!document.querySelector('#findBar');
+                            // V2：自定义打印预览已删除，Ctrl+P 直接走原生打印页
+                            const printTitle = document.querySelector('#btnPrint')?.title || '';
+                            results.printPreviewRemoved = !document.querySelector('#printPreviewDialog') &&
+                                !document.querySelector('#btnPrintPreview') &&
+                                (printTitle.includes('Ctrl+P') || printTitle.includes('⌘P'));
                             results.startupLoaded = (editorEl?.innerText || '').includes('hello');
                             results.helpTabs = document.querySelectorAll('.help-tab').length;
                             document.querySelector('[data-help-tab="about"]')?.click();
@@ -1412,11 +1414,6 @@ pub fn run() {
                                     // 完整 PDF 落盘，交给 CI 上传后人工检查尺寸和边距
                                     await window.wordlite.file.writeFile({long_pdf}, longPdf, true);
                                     results.longPdfFile = {long_pdf};
-                                    document.querySelector('#btnPrintPreview')?.click();
-                                    await new Promise((resolve) => setTimeout(resolve, 500));
-                                    results.previewPages = document.querySelectorAll('.preview-page').length;
-                                    results.previewMeta = document.querySelector('#previewMeta')?.textContent;
-                                    document.querySelector('#printPreviewDialog')?.close();
                                 }} catch (longError) {{
                                     results.longError = String(longError);
                                 }}
