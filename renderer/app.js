@@ -13,6 +13,7 @@ import { EditorState, TextSelection } from '@tiptap/pm/state'
 import {
   FindHighlight,
   findHighlightKey,
+  imageCropFrame,
   Indent,
   LineHeight,
   FontSize,
@@ -644,11 +645,14 @@ function openImageDialog (selectedImage = null) {
   const naturalWidth = selected?.naturalWidth || attrs.width || 300
   const naturalHeight = selected?.naturalHeight || attrs.height || 200
   const crop = attrs.crop || {}
-  const width = Number(attrs.width) || naturalWidth
-  const height = Number(attrs.height) || naturalHeight
-  imageRatio = width && height ? width / height : naturalWidth / naturalHeight
-  imageWidthInput.value = Math.round(width)
-  imageHeightInput.value = Math.round(height)
+  // V3 起 width/height 表示「裁剪后的可见尺寸」。对话框里要填的是原图显示尺寸，
+  // 否则原样点确认会按已裁剪的比例再算一次，图会越裁越小。
+  const frame = imageCropFrame(attrs, { width: naturalWidth, height: naturalHeight })
+  const fullWidth = frame.innerWidth || naturalWidth
+  const fullHeight = frame.innerHeight || naturalHeight
+  imageRatio = fullWidth && fullHeight ? fullWidth / fullHeight : naturalWidth / naturalHeight
+  imageWidthInput.value = Math.round(fullWidth)
+  imageHeightInput.value = Math.round(fullHeight)
   imageLockRatio.checked = true
   document.querySelector('#imageAlign').value = attrs.align || 'left'
   document.querySelector('#imageWrap').value = attrs.wrap || 'none'
@@ -671,8 +675,6 @@ imageHeightInput.addEventListener('input', () => {
 })
 
 document.querySelector('#btnApplyImage').addEventListener('click', () => {
-  const width = imageWidthInput.value === '' ? null : clamp(imageWidthInput.value, 8, 5000, 300)
-  const height = imageHeightInput.value === '' ? null : clamp(imageHeightInput.value, 8, 5000, 200)
   const crop = {}
   for (const side of ['top', 'right', 'bottom', 'left']) {
     const id = `#crop${side[0].toUpperCase()}${side.slice(1)}`
@@ -682,6 +684,14 @@ document.querySelector('#btnApplyImage').addEventListener('click', () => {
     showStatus('裁剪比例过大：上下或左右之和必须小于 100%', 0)
     return
   }
+  // 输入框里是「原图显示尺寸」，写进文档的 width/height 必须是裁剪后的可见尺寸，
+  // 和 Word 一致（wp:extent 记可见区域，a:srcRect 记裁掉的比例）。
+  const fullWidth = imageWidthInput.value === '' ? null : clamp(imageWidthInput.value, 8, 5000, 300)
+  const fullHeight = imageHeightInput.value === '' ? null : clamp(imageHeightInput.value, 8, 5000, 200)
+  const visibleX = 1 - (crop.left + crop.right) / 100
+  const visibleY = 1 - (crop.top + crop.bottom) / 100
+  const width = fullWidth === null ? null : Math.max(1, Math.round(fullWidth * visibleX))
+  const height = fullHeight === null ? null : Math.max(1, Math.round(fullHeight * visibleY))
   editor.chain().focus().updateAttributes('image', {
     width,
     height,
@@ -1784,6 +1794,7 @@ async function loadFile (filePath) {
     const data = await fileApi.readFile(filePath, format === 'docx')
     let json
     let importedPageSetup = null
+    let wrapNotice = ''
     if (format === 'docx') {
       const result = await docxBase64ToJSON(data, editorExtensions, {
         defaultFontFamily: settings.fontFamily,
@@ -1791,6 +1802,7 @@ async function loadFile (filePath) {
       })
       json = applyMacFontFallback(result.json)
       importedPageSetup = result.pageSetup
+      wrapNotice = result.wrapNotice || ''
       if (result.warnings.length) console.warn('[docx]', result.warnings)
     } else {
       json = textToJSON(data)
@@ -1806,7 +1818,9 @@ async function loadFile (filePath) {
     updateDocumentState()
     await fileApi.clearAutosave()
     addRecentFile(filePath)
-    showStatus(format === 'docx' ? 'DOCX 已导入；部分复杂对象可能已简化或忽略' : `已打开 ${currentFileName}`, format === 'docx' ? 8000 : 5000)
+    const imported = format === 'docx' ? 'DOCX 已导入；部分复杂对象可能已简化或忽略' : `已打开 ${currentFileName}`
+    // 有图片环绕降级时一并提示，别让「已导入」把它盖掉
+    showStatus(wrapNotice ? `${imported}。${wrapNotice}` : imported, format === 'docx' ? 8000 : 5000)
     resetDocumentPosition()
     return true
   } catch (error) {
