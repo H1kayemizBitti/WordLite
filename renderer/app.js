@@ -258,6 +258,116 @@ const editor = new Editor({
   onUpdate: handleEditorUpdate
 })
 
+/* ---------------- 空白处拖选 ---------------- */
+
+// 按在页边距或纸外灰底上时 ProseMirror 收不到事件，光标会停在原处。
+// 这里把按点换算成最近的正文位置：左右边距落到该行的行首/行尾，上下越界落到文首/文末。
+
+const workspaceEl = document.querySelector('#workspace')
+let blankDrag = null
+let blankDragFrame = 0
+
+function blankPos (clientX, clientY) {
+  const doc = editor.state.doc
+  const view = editor.view
+  const box = view.dom.getBoundingClientRect()
+  if (clientY < box.top) return 0
+  if (clientY > box.bottom) return doc.content.size
+  // 夹到正文左右边界内，posAtCoords 才会按这一行算出最近的位置
+  const left = Math.min(box.right - 1, Math.max(box.left + 1, clientX))
+  const hit = view.posAtCoords({ left, top: clientY })
+  return hit ? hit.pos : (clientY < (box.top + box.bottom) / 2 ? 0 : doc.content.size)
+}
+
+function blankDragApply () {
+  if (!blankDrag) return
+  const doc = editor.state.doc
+  const selection = TextSelection.between(
+    doc.resolve(blankDrag.anchor),
+    doc.resolve(blankPos(blankDrag.x, blankDrag.y))
+  )
+  if (selection.eq(editor.state.selection)) return
+  editor.view.dispatch(editor.state.tr.setSelection(selection))
+}
+
+function blankDragMove (event) {
+  if (!blankDrag) return
+  blankDrag.x = event.clientX
+  blankDrag.y = event.clientY
+  blankDragApply()
+  blankDragAutoScroll()
+}
+
+function blankDragEnd () {
+  if (!blankDrag) return
+  const pointerId = blankDrag.pointerId
+  blankDrag = null
+  cancelAnimationFrame(blankDragFrame)
+  blankDragFrame = 0
+  window.removeEventListener('pointermove', blankDragMove)
+  window.removeEventListener('pointerup', blankDragEnd)
+  window.removeEventListener('pointercancel', blankDragEnd)
+  window.removeEventListener('blur', blankDragEnd)
+  if (workspaceEl.hasPointerCapture?.(pointerId)) workspaceEl.releasePointerCapture(pointerId)
+}
+
+// 鼠标停在可视区上下边缘附近时持续滚动，滚完按新版面重算选区
+function blankDragAutoScroll () {
+  const rect = workspaceEl.getBoundingClientRect()
+  const edge = 48
+  let step = 0
+  if (blankDrag.y < rect.top + edge) step = -Math.ceil((rect.top + edge - blankDrag.y) / 6)
+  else if (blankDrag.y > rect.bottom - edge) step = Math.ceil((blankDrag.y - rect.bottom + edge) / 6)
+  if (!step) {
+    cancelAnimationFrame(blankDragFrame)
+    blankDragFrame = 0
+    return
+  }
+  step = Math.max(-30, Math.min(30, step))
+  const before = workspaceEl.scrollTop
+  workspaceEl.scrollTop = before + step
+  if (workspaceEl.scrollTop !== before) blankDragApply()
+  if (!blankDragFrame) blankDragFrame = requestAnimationFrame(blankDragScroll)
+}
+
+function blankDragScroll () {
+  blankDragFrame = 0
+  if (!blankDrag) return
+  blankDragAutoScroll()
+}
+
+// 点在滚动条上时不算空白处，避免拖动滑块时改选区
+function onScrollbar (event) {
+  const rect = workspaceEl.getBoundingClientRect()
+  return event.clientX >= rect.left + workspaceEl.clientWidth ||
+    event.clientY >= rect.top + workspaceEl.clientHeight
+}
+
+workspaceEl.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || event.defaultPrevented || onScrollbar(event)) return
+  if (event.target.closest?.('.ProseMirror')) return
+  event.preventDefault()
+  blankDrag = {
+    // Shift+单击空白处沿用现有选区的起点，继续扩展
+    anchor: event.shiftKey ? editor.state.selection.anchor : blankPos(event.clientX, event.clientY),
+    x: event.clientX,
+    y: event.clientY,
+    pointerId: event.pointerId
+  }
+  blankDragApply()
+  editor.view.focus()
+  // 捕获指针，拖出窗口也还能继续收到移动事件
+  try {
+    workspaceEl.setPointerCapture(event.pointerId)
+  } catch {
+    // 个别环境不支持指针捕获，退回只有在窗口内有效的拖动
+  }
+  window.addEventListener('pointermove', blankDragMove)
+  window.addEventListener('pointerup', blankDragEnd)
+  window.addEventListener('pointercancel', blankDragEnd)
+  window.addEventListener('blur', blankDragEnd)
+})
+
 /* ---------------- 选项卡 ---------------- */
 
 document.querySelectorAll('.tab').forEach((tab) => {

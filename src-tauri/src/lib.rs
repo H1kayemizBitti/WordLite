@@ -1351,6 +1351,36 @@ pub fn run() {
                             }} catch (openError) {{
                                 results.openError = String(openError);
                             }}
+                            // X1：左页边距按下拖到该行中间，选区非空且起点是行首
+                            try {{
+                                editorEl.focus();
+                                document.execCommand('selectAll', false, null);
+                                document.execCommand('delete', false, null);
+                                document.execCommand('insertHTML', false,
+                                    '<p>第一段文字甲乙丙丁戊己庚辛壬癸</p><p>第二段文字甲乙丙丁戊己庚辛壬癸</p>');
+                                const wsEl = document.querySelector('#workspace');
+                                wsEl.scrollTop = 0;
+                                await new Promise((resolve) => setTimeout(resolve, 300));
+                                const edBox = editorEl.getBoundingClientRect();
+                                const line = editorEl.querySelectorAll('p')[1].getBoundingClientRect();
+                                const lineMid = line.top + line.height / 2;
+                                const make = (type, x, y, buttons) => new PointerEvent(type, {{
+                                    bubbles: true, cancelable: true, clientX: x, clientY: y,
+                                    button: 0, buttons: buttons, pointerId: 1,
+                                    pointerType: 'mouse', isPrimary: true
+                                }});
+                                wsEl.dispatchEvent(make('pointerdown', edBox.left - 40, lineMid, 1));
+                                window.dispatchEvent(make('pointermove', line.left + 60, lineMid, 1));
+                                window.dispatchEvent(make('pointerup', line.left + 60, lineMid, 0));
+                                await new Promise((resolve) => setTimeout(resolve, 150));
+                                const picked = document.getSelection().toString();
+                                const lineText = editorEl.querySelectorAll('p')[1].textContent;
+                                results.blankDragText = picked;
+                                results.blankDragOk = picked.length > 0 && lineText.startsWith(picked);
+                            }} catch (blankError) {{
+                                results.blankDragOk = false;
+                                results.blankDragError = String(blankError);
+                            }}
                             results.state = 'ok';
                         }} catch (error) {{
                             results.error = String(error);

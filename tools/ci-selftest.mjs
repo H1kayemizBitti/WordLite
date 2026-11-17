@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 
 const PREFIX = '[selftest] '
-const REQUIRED_BOOL = ['bridge', 'tauri', 'editor', 'openedNewWindow']
+const REQUIRED_BOOL = ['bridge', 'tauri', 'editor', 'openedNewWindow', 'blankDragOk']
 const REQUIRED_VALUE = {
   state: 'ok',
   read: 'hello',
