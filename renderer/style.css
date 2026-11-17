@@ -415,6 +415,65 @@ body.file-drag-over::after {
     #fff;
 }
 
+/* ---------- 右键菜单 ---------- */
+
+.context-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 172px;
+  max-width: min(320px, 90vw);
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-pop);
+  font-size: 13px;
+  user-select: none;
+}
+
+.context-menu[hidden] { display: none; }
+
+.context-menu-list { display: flex; flex-direction: column; }
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.context-menu-item > span:first-child { flex: 1; }
+
+.context-menu-shortcut {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.context-menu-item:hover,
+.context-menu-item:focus { background: var(--active-bg); outline: none; }
+
+.context-menu-item:disabled {
+  color: var(--text-dim);
+  opacity: 0.55;
+  background: transparent;
+  cursor: default;
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
 /* ---------- 编辑区 ---------- */
 
 #workspace {
@@ -1056,7 +1115,7 @@ body.file-drag-over::after {
 .preview-dialog .dialog-foot .dialog-note { max-width: 48%; }
 
 @media print {
-  dialog { display: none !important; }
+  dialog, #contextMenu { display: none !important; }
   html, body {
     height: auto;
     overflow: visible;

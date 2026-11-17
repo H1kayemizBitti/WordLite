@@ -80,6 +80,77 @@ fn next_doc_label() -> String {
     format!("doc-{}", WINDOW_COUNTER.fetch_add(1, Ordering::SeqCst))
 }
 
+// Windows 生产版的兜底：从 WebView2 层面关掉浏览器默认右键菜单和浏览器快捷键。
+// 渲染层已经拦了 contextmenu 和 F5/Ctrl+R，这里再上一层，防止 WebView2 以后改了事件顺序。
+// 只关这两项：Ctrl+C/X/V/Z/Y/A、输入法、Ctrl+滚轮缩放都还由 Chromium 自己处理。
+// debug 构建不动，保留默认菜单和开发者工具（R-09）。
+#[cfg(windows)]
+fn configure_webview_settings(window: &tauri::WebviewWindow) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2Controller, ICoreWebView2PermissionRequestedEventArgs,
+        ICoreWebView2Settings3, ICoreWebView2_3, COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ,
+        COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+    };
+    use webview2_com::PermissionRequestedEventHandler;
+    use windows::core::Interface;
+
+    let _ = window.with_webview(|webview| {
+        let setup = (|| -> Result<(), String> {
+            let controller: ICoreWebView2Controller = webview.controller();
+            let core: ICoreWebView2_3 = unsafe { controller.CoreWebView2() }
+                .and_then(|core| core.cast())
+                .map_err(|e| e.to_string())?;
+            let settings3: ICoreWebView2Settings3 = unsafe { core.Settings() }
+                .and_then(|settings| settings.cast())
+                .map_err(|e| e.to_string())?;
+            unsafe {
+                settings3
+                    .SetAreDefaultContextMenusEnabled(false)
+                    .map_err(|e| e.to_string())?;
+                settings3
+                    .SetAreBrowserAcceleratorKeysEnabled(false)
+                    .map_err(|e| e.to_string())?;
+            }
+            // 自定义菜单里的「粘贴」要读剪贴板；WebView2 默认会弹权限框。
+            // 只对本地页面（tauri.localhost / tauri://）的「读剪贴板」自动允许，其它照旧。
+            let handler = PermissionRequestedEventHandler::create(Box::new(
+                move |_sender, args: Option<ICoreWebView2PermissionRequestedEventArgs>| {
+                    if let Some(args) = args {
+                        let mut kind = COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ;
+                        let known = unsafe { args.PermissionKind(&mut kind) }.is_ok();
+                        let mut raw = windows::core::PWSTR::null();
+                        let page = match unsafe { args.Uri(&mut raw) } {
+                            Ok(()) => webview2_com::CoTaskMemPWSTR::from(raw).to_string(),
+                            Err(_) => String::new(),
+                        };
+                        let local_page =
+                            page.contains("tauri.localhost") || page.starts_with("tauri://");
+                        if known
+                            && local_page
+                            && kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ
+                        {
+                            let _ = unsafe { args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW) };
+                        }
+                    }
+                    Ok(())
+                },
+            ));
+            let mut token = 0i64;
+            unsafe {
+                core.add_PermissionRequested(&handler, &mut token)
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = setup {
+            eprintln!("[wordlite] 配置 WebView2 设置失败：{error}");
+        }
+    });
+}
+
 fn build_document_window(
     app: &tauri::AppHandle,
     label: &str,
@@ -108,6 +179,8 @@ fn build_document_window(
             return Err(error.to_string());
         }
     };
+    #[cfg(windows)]
+    configure_webview_settings(&window);
     let _ = window.set_focus();
     Ok(window)
 }
@@ -1197,6 +1270,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .setup(|app| {
+            // 主窗口由配置文件创建，这里补上兜底设置（doc-* 窗口在 build_document_window 里设）
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                configure_webview_settings(&window);
+            }
             // 接着已有的 doc 自动保存文件编号，避免新窗口的 label 覆盖旧恢复副本
             if let Ok(dir) = app.path().app_data_dir() {
                 let mut max = 0;
@@ -1381,6 +1459,200 @@ pub fn run() {
                                 results.blankDragOk = false;
                                 results.blankDragError = String(blankError);
                             }}
+                            // V1：右键菜单 / 刷新封堵
+                            // 用导航计数判断页面有没有重载：重载一次 window 就重建，计数清零
+                            const marked = window.__wlV1Mark = (window.__wlV1Mark || 0) + 1;
+                            const noReload = () => window.__wlV1Mark === marked;
+                            // 刷新键在「焦点不在正文」的位置按：这是用户离开编辑器时的情形
+                            const press = (key, modifiers = [], code) => {{
+                                const mods = {{ Alt: 1, Control: 2, Meta: 4, Shift: 8 }};
+                                const flags = modifiers.reduce((acc, name) => acc | (mods[name] || 0), 0);
+                                let down = null;
+                                for (const type of ['keydown', 'keyup']) {{
+                                    const ev = new KeyboardEvent(type, {{
+                                        key, code: code || key, ctrlKey: modifiers.includes('Control'),
+                                        altKey: modifiers.includes('Alt'), shiftKey: modifiers.includes('Shift'),
+                                        metaKey: modifiers.includes('Meta'), bubbles: true, cancelable: true
+                                    }});
+                                    document.body.dispatchEvent(ev);
+                                    if (type === 'keydown') down = ev;
+                                }}
+                                return down;
+                            }}
+                            // 1) F5 / Ctrl+R / Ctrl+Shift+R / Alt+← 都被拦下
+                            try {{
+                                const refreshKeys = [];
+                                for (const [name, key, mods, code] of [
+                                    ['F5', 'F5', [], 'F5'],
+                                    ['CtrlR', 'r', ['Control'], 'KeyR'],
+                                    ['CtrlShiftR', 'r', ['Control', 'Shift'], 'KeyR'],
+                                    ['AltLeft', 'ArrowLeft', ['Alt'], 'ArrowLeft']
+                                ]) {{
+                                    const ev = press(key, mods, code);
+                                    refreshKeys.push(name + '=' + ev.defaultPrevented);
+                                    results['refreshBlocked_' + name] = ev.defaultPrevented;
+                                }}
+                                results.refreshKeys = refreshKeys.join(' ');
+                                results.refreshBlocked = ['F5', 'CtrlR', 'CtrlShiftR', 'AltLeft']
+                                    .every((name) => results['refreshBlocked_' + name] === true);
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                results.refreshNoReload = noReload();
+                            }} catch (refreshError) {{
+                                results.refreshBlocked = false;
+                                results.refreshError = String(refreshError);
+                            }}
+                            // 2) 正文里 Ctrl+R 仍然是右对齐：拦刷新不能把右对齐一起拦掉
+                            try {{
+                                const ed = editorEl.editor;
+                                ed.chain().focus().setContent('<p>右对齐检查</p>').run();
+                                ed.chain().selectAll().setTextAlign('left').run();
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                editorEl.dispatchEvent(new KeyboardEvent('keydown', {{
+                                    key: 'r', code: 'KeyR', ctrlKey: true, bubbles: true, cancelable: true
+                                }}));
+                                await new Promise((resolve) => setTimeout(resolve, 150));
+                                results.alignRightShortcut = ed.getAttributes('paragraph').textAlign === 'right';
+                            }} catch (alignError) {{
+                                results.alignRightShortcut = false;
+                                results.alignRightError = String(alignError);
+                            }}
+                            // 3) Ctrl+F 打开查找、查找框里右键保留默认菜单、查找框里 Ctrl+R 不刷新
+                            try {{
+                                editorEl.focus();
+                                editorEl.dispatchEvent(new KeyboardEvent('keydown', {{
+                                    key: 'f', code: 'KeyF', ctrlKey: true, bubbles: true, cancelable: true
+                                }}));
+                                await new Promise((resolve) => setTimeout(resolve, 150));
+                                results.findOpened = !document.querySelector('#findBar').hidden;
+                                const findInput = document.querySelector('#findInput');
+                                const ctx = new MouseEvent('contextmenu', {{
+                                    bubbles: true, cancelable: true, clientX: 10, clientY: 10
+                                }});
+                                findInput.dispatchEvent(ctx);
+                                results.inputContextAllowed = !ctx.defaultPrevented;
+                                results.findRefreshNoReload = noReload();
+                                document.querySelector('#btnFindClose').click();
+                            }} catch (findError) {{
+                                results.findOpened = false;
+                                results.findError = String(findError);
+                            }}
+                            // 4) 正文 / 纸边距右键弹自定义菜单；功能区右键不弹；图片右键选中图片
+                            try {{
+                                const ed2 = editorEl.editor;
+                                const menu = document.querySelector('#contextMenu');
+                                // 读菜单里可点的项（跳过禁用项和分隔线）
+                                const itemsOf = () => [...menu.querySelectorAll('.context-menu-item:not(:disabled)')]
+                                    .map((el) => el.textContent.replace(/\\s+/g, ' ').trim());
+                                const fire = (el, x, y) => {{
+                                    const ev = new MouseEvent('contextmenu', {{
+                                        bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2
+                                    }});
+                                    el.dispatchEvent(ev);
+                                    return ev;
+                                }};
+                                ed2.chain().focus().setContent('<p>第一段右键文字</p><p>第二段右键文字</p>').run();
+                                await new Promise((resolve) => setTimeout(resolve, 150));
+                                const firstLine = editorEl.querySelectorAll('p')[0].getBoundingClientRect();
+                                const textEvent = fire(editorEl.querySelectorAll('p')[0],
+                                    firstLine.left + 30, firstLine.top + firstLine.height / 2);
+                                results.textContextPrevented = textEvent.defaultPrevented;
+                                results.textMenuOpen = !menu.hidden;
+                                results.textMenuItems = itemsOf();
+                                results.textMenuHasRefresh = itemsOf().some((label) => label.includes('刷新'));
+                                // 从别处点到选区外面：光标跟到点击处，菜单里只剩没有选区时的项
+                                ed2.chain().focus().setTextSelection({{ from: 1, to: 6 }}).run();
+                                const secondLine = editorEl.querySelectorAll('p')[1].getBoundingClientRect();
+                                fire(editorEl.querySelectorAll('p')[1],
+                                    secondLine.left + 30, secondLine.top + secondLine.height / 2);
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                results.caretMovedToClick = ed2.state.selection.empty &&
+                                    ed2.state.selection.from >= ed2.state.doc.child(0).nodeSize;
+                                results.noSelectionHasCut = itemsOf().some((label) => label.includes('剪切'));
+                                // 选区里右键：选区原样保留
+                                ed2.chain().focus().setTextSelection({{ from: 1, to: 6 }}).run();
+                                const selectedText = ed2.state.doc.textBetween(1, 6);
+                                fire(editorEl.querySelectorAll('p')[0],
+                                    firstLine.left + 30, firstLine.top + firstLine.height / 2);
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                results.selectionKept = ed2.state.doc.textBetween(
+                                    ed2.state.selection.from, ed2.state.selection.to) === selectedText;
+                                results.selectionHasCut = itemsOf().some((label) => label.includes('剪切'));
+                                fire(document.body, 2, 2); // 点菜单外：关掉
+                                results.outsideClickCloses = menu.hidden;
+                                const paper = document.querySelector('.paper').getBoundingClientRect();
+                                const blankEvent = fire(document.querySelector('.paper'),
+                                    paper.right - 10, paper.top + 40);
+                                results.blankContextPrevented = blankEvent.defaultPrevented;
+                                results.blankMenuOpen = !menu.hidden;
+                                fire(document.body, 2, 2);
+                                const ribbonEvent = fire(document.querySelector('#ribbon .tab'), 100, 30);
+                                results.ribbonContextPrevented = ribbonEvent.defaultPrevented;
+                                results.ribbonMenuOpen = !menu.hidden;
+                                // 图片：右键后是 NodeSelection，菜单换成图片项
+                                ed2.chain().focus().setContent(
+                                    '<p>图片右键</p><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">'
+                                ).run();
+                                await new Promise((resolve) => setTimeout(resolve, 300));
+                                const img = editorEl.querySelector('img');
+                                const imgBox = img.getBoundingClientRect();
+                                const imageEvent = fire(img, imgBox.left + imgBox.width / 2, imgBox.top + imgBox.height / 2);
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                results.imageContextPrevented = imageEvent.defaultPrevented;
+                                results.imageSelected = ed2.state.selection.node?.type.name === 'image';
+                                results.imageMenuItems = menu.hidden ? [] : itemsOf();
+                                results.imageMenuHasSettings = results.imageMenuItems
+                                    .some((label) => label.includes('图片设置'));
+                                fire(document.body, 2, 2);
+                                results.menuClosedAfterImage = menu.hidden;
+                            }} catch (menuError) {{
+                                results.textMenuOpen = false;
+                                results.menuError = String(menuError);
+                            }}
+                            // 5) Shift+F10 在光标处打开、方向键 + Tab 不跑出菜单；Esc 先关菜单，查找栏还在
+                            try {{
+                                const ed3 = editorEl.editor;
+                                const menu = document.querySelector('#contextMenu');
+                                ed3.chain().focus().setContent('<p>键盘菜单检查</p><p>第二段</p>').run();
+                                ed3.chain().focus('end').run();
+                                document.dispatchEvent(new KeyboardEvent('keydown', {{
+                                    key: 'f', code: 'KeyF', ctrlKey: true, bubbles: true, cancelable: true
+                                }}));
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                results.findBarOpenBeforeEsc = !document.querySelector('#findBar').hidden;
+                                document.dispatchEvent(new KeyboardEvent('keydown', {{
+                                    key: 'F10', code: 'F10', shiftKey: true, bubbles: true, cancelable: true
+                                }}));
+                                await new Promise((resolve) => setTimeout(resolve, 150));
+                                results.keyboardMenuOpen = !menu.hidden;
+                                results.keyboardMenuItems = menu.hidden
+                                    ? 0
+                                    : menu.querySelectorAll('.context-menu-item').length;
+                                results.keyboardMenuItemRole = menu.hidden
+                                    ? 0
+                                    : menu.querySelectorAll('[role=menuitem]').length;
+                                // 方向键在菜单里走一圈不会跑出去；Tab 也不会把焦点送出菜单
+                                const moveKey = (key, shiftKey = false) => menu.firstElementChild.dispatchEvent(
+                                    new KeyboardEvent('keydown', {{ key, shiftKey, bubbles: true, cancelable: true }}));
+                                for (let i = 0; i < 3; i++) moveKey('ArrowDown');
+                                results.keyboardNavInsideMenu = menu.contains(document.activeElement);
+                                moveKey('Tab');
+                                results.tabStaysInsideMenu = menu.contains(document.activeElement);
+                                document.dispatchEvent(new KeyboardEvent('keydown', {{
+                                    key: 'Escape', code: 'Escape', bubbles: true, cancelable: true
+                                }}));
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                results.escClosedMenu = menu.hidden;
+                                results.escKeptFindBar = !document.querySelector('#findBar').hidden;
+                                document.querySelector('#btnFindClose').click();
+                            }} catch (keyboardError) {{
+                                results.keyboardMenuOpen = false;
+                                results.keyboardMenuError = String(keyboardError);
+                            }}
+                            results.contextMenuOk = !!(results.textMenuOpen && results.blankMenuOpen &&
+                                results.ribbonContextPrevented && !results.ribbonMenuOpen &&
+                                results.imageSelected && results.imageMenuHasSettings &&
+                                results.keyboardMenuOpen && results.escClosedMenu &&
+                                results.refreshBlocked && results.refreshNoReload);
                             results.state = 'ok';
                         }} catch (error) {{
                             results.error = String(error);

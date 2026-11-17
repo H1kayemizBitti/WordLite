@@ -533,16 +533,32 @@ function insertPageBreak () {
   chain.insertContent([{ type: 'pageBreak' }, { type: 'paragraph' }]).run()
 }
 
+// 优先取 text/html 交给 ProseMirror 的粘贴管线，格式和 Ctrl+V 一致；只有纯文本时走
+// pasteText。读不到再退回 Chromium 原生粘贴，仍失败就提示快捷键（WKWebView 上可能被拒）。
 async function pasteFromClipboard () {
   editor.commands.focus()
+  let html = ''
+  let text = ''
   try {
-    const text = await navigator.clipboard.readText()
-    if (text) editor.chain().focus().insertContent(text).run()
+    const items = await navigator.clipboard.read()
+    for (const item of items) {
+      if (!html && item.types.includes('text/html')) {
+        html = await (await item.getType('text/html')).text()
+      }
+      if (!text && item.types.includes('text/plain')) {
+        text = await (await item.getType('text/plain')).text()
+      }
+    }
   } catch {
-    // 剪贴板读取被拒时退化为 Chromium 原生粘贴；WKWebView 里这条也可能被拒
-    const pasted = document.execCommand('paste')
-    if (isMac && !pasted) showStatus('无法读取剪贴板，请按 ⌘V 粘贴')
+    // 权限被拒或剪贴板为空：继续走下面的兜底
   }
+  if (html) editor.view.pasteHTML(html)
+  else if (text) editor.view.pasteText(text)
+  else if (!document.execCommand('paste')) {
+    showStatus(isMac ? '无法读取剪贴板，请按 ⌘V 粘贴' : '无法读取剪贴板，请按 Ctrl+V 粘贴')
+    return
+  }
+  editor.view.focus()
 }
 
 async function insertImage () {
@@ -715,6 +731,371 @@ editor.view.dom.addEventListener('dblclick', (event) => {
   openImageDialog(image)
 })
 
+/* ---------------- 右键菜单 ---------------- */
+
+const contextMenu = document.querySelector('#contextMenu')
+const contextMenuList = contextMenu.querySelector('.context-menu-list')
+const modifierLabel = isMac ? '⌘' : 'Ctrl'
+
+let contextMenuInfo = null
+// 右键按下前的选区：ProseMirror 收到右键鼠标事件时可能把整格选中收成光标，
+// 这里先记一份，右键落在原选区里就用它还原（R-04 表格整格复制）
+let contextMenuAnchor = null
+
+function isContextMenuOpen () {
+  return !contextMenu.hidden
+}
+
+// 菜单项按位置和状态现拼：复制都用 ProseMirror 自己的序列化，格式和 Ctrl+C 一致
+function contextMenuItemsFor (kind, state) {
+  const canWrite = () => !editor.isReadOnly
+  const cutItem = {
+    label: '剪切', shortcut: `${modifierLabel}+X`, enabled: canWrite(),
+    run: () => { restoreContextMenuSelection(); execEditorCommand('cut') }
+  }
+  const copyItem = {
+    label: '复制', shortcut: `${modifierLabel}+C`, enabled: true,
+    run: () => { restoreContextMenuSelection(); execEditorCommand('copy') }
+  }
+  const pasteItem = {
+    // 粘贴：菜单点击本身是用户手势，可以读剪贴板，拿到 text/html 后交给 ProseMirror
+    // 的粘贴管线，格式和 Ctrl+V 一致；读不到再退回原生命令，仍不行就提示按快捷键
+    label: '粘贴', shortcut: `${modifierLabel}+V`, enabled: canWrite(), run: () => pasteFromClipboard()
+  }
+  const selectAllItem = {
+    label: '全选',
+    shortcut: `${modifierLabel}+A`,
+    enabled: true,
+    run: () => editor.chain().focus().selectAll().run()
+  }
+  const insertImageItem = {
+    label: '插入图片…',
+    enabled: canWrite(),
+    // 对话框关掉后把焦点还给编辑器，插入位置仍是右键处
+    run: () => {
+      editor.view.focus()
+      insertImage()
+    }
+  }
+
+  if (kind === 'image') {
+    return [
+      {
+        label: '图片设置…',
+        shortcut: 'Enter',
+        enabled: true,
+        run: () => openImageDialog()
+      },
+      {
+        label: '裁剪',
+        enabled: true,
+        // V5 之前先从裁剪输入框开始：打开对话框后把焦点放到「上」
+        run: () => {
+          openImageDialog()
+          const cropTop = document.querySelector('#cropTop')
+          cropTop.focus()
+          cropTop.select()
+        }
+      },
+      { label: '复制', shortcut: `${modifierLabel}+C`, enabled: true,
+        run: () => { restoreContextMenuSelection(); execEditorCommand('copy') } },
+      {
+        label: '删除',
+        enabled: canWrite(),
+        run: () => editor.chain().focus().deleteSelection().run()
+      }
+    ]
+  }
+
+  if (kind === 'table') {
+    const can = (command) => editor.can().chain().focus()[command]().run()
+    return [
+      cutItem,
+      copyItem,
+      pasteItem,
+      { separator: true },
+      { label: '在上方插入行', enabled: can('addRowBefore'), run: () => editor.chain().focus().addRowBefore().run() },
+      { label: '在下方插入行', enabled: can('addRowAfter'), run: () => editor.chain().focus().addRowAfter().run() },
+      { label: '在左侧插入列', enabled: can('addColumnBefore'), run: () => editor.chain().focus().addColumnBefore().run() },
+      { label: '在右侧插入列', enabled: can('addColumnAfter'), run: () => editor.chain().focus().addColumnAfter().run() },
+      { label: '删除行', enabled: can('deleteRow'), run: () => editor.chain().focus().deleteRow().run() },
+      { label: '删除列', enabled: can('deleteColumn'), run: () => editor.chain().focus().deleteColumn().run() },
+      { label: '合并单元格', enabled: can('mergeCells'), run: () => editor.chain().focus().mergeCells().run() },
+      { label: '拆分单元格', enabled: can('splitCell'), run: () => editor.chain().focus().splitCell().run() },
+      { separator: true },
+      insertImageItem
+    ]
+  }
+
+  // 正文文字和纸空白处：没有选区时不给「剪切」，和 Word 里灰掉的效果一致
+  const items = !state.selection.empty
+    ? [cutItem, copyItem]
+    : [copyItem]
+  return [...items, pasteItem, selectAllItem, { separator: true }, insertImageItem]
+}
+
+// 剪切 / 复制走 Chromium 原生命令：ProseMirror 的剪贴板序列化会在 keydown 时
+// 挂好，结果和 Ctrl+X / Ctrl+C 完全一样（选中的图片按节点复制）。
+function execEditorCommand (command) {
+  editor.view.focus()
+  return document.execCommand(command)
+}
+
+function buildContextMenu (items) {
+  // 先显示再拼项：隐藏状态（display:none）里的按钮拿不到焦点
+  contextMenu.hidden = false
+  contextMenuList.innerHTML = ''
+  for (const item of items) {
+    if (item.separator) {
+      const line = document.createElement('div')
+      line.className = 'context-menu-separator'
+      contextMenuList.appendChild(line)
+      continue
+    }
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'context-menu-item'
+    button.setAttribute('role', 'menuitem')
+    if (item.enabled === false) {
+      button.disabled = true
+      button.setAttribute('aria-disabled', 'true')
+    }
+    const label = document.createElement('span')
+    label.textContent = item.label
+    button.appendChild(label)
+    if (item.shortcut) {
+      const key = document.createElement('span')
+      key.className = 'context-menu-shortcut'
+      key.textContent = item.shortcut
+      button.appendChild(key)
+    }
+    button.addEventListener('click', () => {
+      if (item.enabled === false) return
+      closeContextMenu(false)
+      item.run()
+    })
+    contextMenuList.appendChild(button)
+  }
+  const enabled = contextMenuList.querySelectorAll('.context-menu-item:not(:disabled)')
+  if (enabled[0]) enabled[0].focus({ preventScroll: true })
+}
+
+// 贴着指针（或光标）显示；靠右/靠下放不下时翻到另一侧，保证整块菜单在窗口里
+function placeContextMenu (x, y) {
+  contextMenu.hidden = false
+  contextMenu.style.left = '0px'
+  contextMenu.style.top = '0px'
+  const box = contextMenu.getBoundingClientRect()
+  const gap = 8
+  let left = x
+  let top = y
+  if (left + box.width + gap > window.innerWidth) left = Math.max(gap, x - box.width)
+  if (top + box.height + gap > window.innerHeight) top = Math.max(gap, y - box.height)
+  contextMenu.style.left = `${Math.round(left)}px`
+  contextMenu.style.top = `${Math.round(top)}px`
+}
+
+// 菜单打开后 ProseMirror 可能又把选区收成光标（右键的 mouseup 在菜单弹出之后），
+// 执行剪切 / 复制前按 mousedown 记下的选区还原一次
+function restoreContextMenuSelection () {
+  if (!contextMenuAnchor) return
+  if (!editor.state.selection.empty) return
+  editor.view.dispatch(editor.state.tr.setSelection(contextMenuAnchor.selection))
+}
+
+function openContextMenuAt (x, y, kind) {
+  const items = contextMenuItemsFor(kind, editor.state)
+  contextMenuInfo = { kind, x, y }
+  buildContextMenu(items)
+  placeContextMenu(x, y)
+}
+
+function closeContextMenu (returnFocus = false) {
+  if (contextMenu.hidden && !contextMenuInfo) return
+  contextMenu.hidden = true
+  contextMenuInfo = null
+  if (returnFocus) editor.view.focus()
+}
+
+// 从 DOM 判断右键落在哪：图片、表格单元格、正文文字、纸边距/灰底，以及功能区和对话框这类不弹菜单的地方
+function contextMenuTarget (event) {
+  const target = event.target
+  if (!target || !target.closest) return null
+  if (target.closest('#ribbon, #statusbar, dialog, #contextMenu, .find-bar')) return null
+  const workspace = target.closest('#workspace')
+  if (!workspace) return null
+  if (target.closest('img')) return { kind: 'image' }
+  if (target.closest('td, th')) return { kind: 'table' }
+  if (target.closest('.ProseMirror')) return { kind: 'text' }
+  return { kind: 'blank' }
+}
+
+// 右键时的选区规则（和 Word 一致）：点在选区里保留选区，点在选区外把光标移过去；
+// 图片先选中节点；输入法组合中什么都不做
+function prepareContextMenuSelection (kind, event, hit) {
+  if (editor.view.composing) return false
+  const state = editor.state
+  const pos = hit ? hit.pos : null
+
+  if (kind === 'image') {
+    const img = event.target.closest('img')
+    let imagePos = pos
+    try {
+      imagePos = editor.view.posAtDOM(img, 0)
+    } catch {
+      // 用 posAtCoords 的结果兜底
+    }
+    if (imagePos == null || imagePos < 0) return false
+    const node = state.doc.nodeAt(imagePos)
+    if (!node || node.type.name !== 'image') return false
+    if (state.selection.from !== imagePos || state.selection.to !== imagePos + node.nodeSize) {
+      editor.view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, imagePos)))
+    }
+    return true
+  }
+
+  if (kind === 'text' || kind === 'table') {
+    if (pos == null) return false
+    const selection = state.selection
+    // ProseMirror 收到右键时可能把整格选中收成光标：先按 mousedown 记下的选区还原
+    if (contextMenuAnchor && selection.empty) {
+      const anchor = contextMenuAnchor.selection
+      const inCell = contextMenuAnchor.cells.some((cell) => cell.from <= pos && pos <= cell.to)
+      if (inCell || anchor.from <= pos && pos <= anchor.to) {
+        editor.view.dispatch(state.tr.setSelection(anchor))
+        return true
+      }
+    }
+    // 在已有选区（包括整格选中）里面右键：选区原样保留
+    if (!selection.empty && selection.from <= pos && pos <= selection.to) return true
+    // 点在选区外面：光标移到点击处（Word 的行为），选区随之消失、从零开始拖选
+    const next = TextSelection.create(state.doc, pos)
+    if (!selection.eq(next)) editor.view.dispatch(state.tr.setSelection(next))
+    return true
+  }
+
+  // 纸边距、灰底：按 X1 的规则落到最近的文字位置
+  if (kind === 'blank') {
+    const target = blankPos(event.clientX, event.clientY)
+    const selection = TextSelection.near(state.doc.resolve(target), -1)
+    if (!selection.eq(state.selection)) editor.view.dispatch(state.tr.setSelection(selection))
+    return true
+  }
+  return true
+}
+
+document.addEventListener('contextmenu', (event) => {
+  // 输入框保留默认菜单：查找框、对话框里的数字输入都要能复制粘贴
+  if (isFormTarget(event.target)) return
+  event.preventDefault()
+  const spot = contextMenuTarget(event)
+  if (!spot) {
+    closeContextMenu(false)
+    return
+  }
+  if (editor.view.composing) {
+    // 输入法组合中既不弹菜单，也不改选区
+    closeContextMenu(false)
+    return
+  }
+  const hit = editor.view.posAtCoords({ left: event.clientX, top: event.clientY })
+  if (!prepareContextMenuSelection(spot.kind, event, hit)) {
+    closeContextMenu(false)
+    return
+  }
+  openContextMenuAt(event.clientX, event.clientY, spot.kind)
+}, true)
+
+// Shift+F10 / 菜单键：在光标处弹出，键盘直接操作
+function openContextMenuFromKeyboard () {
+  if (editor.view.composing) return
+  if (document.querySelector('dialog[open]')) return
+  const state = editor.state
+  const selection = state.selection
+  let kind = 'text'
+  if (selection.node?.type.name === 'image') kind = 'image'
+  else if (state.selection.$from.parent.type.name === 'tableCell' ||
+    state.selection.$from.parent.type.name === 'tableHeader' ||
+    state.selection.$from.node(-1)?.type.name === 'table') kind = 'table'
+  let x
+  let y
+  try {
+    const coords = editor.view.coordsAtPos(selection.from)
+    x = coords.left
+    y = coords.bottom
+  } catch {
+    x = window.innerWidth / 2
+    y = window.innerHeight / 2
+  }
+  openContextMenuAt(x, y, kind)
+}
+
+contextMenu.addEventListener('keydown', (event) => {
+  if (event.key === 'Tab') {
+    // Tab 在菜单里循环，不跑出去
+    event.preventDefault()
+    const items = [...contextMenuList.querySelectorAll('.context-menu-item:not(:disabled)')]
+    if (!items.length) return
+    const index = items.indexOf(document.activeElement)
+    const next = event.shiftKey
+      ? items[(index <= 0 ? items.length : index) - 1]
+      : items[(index + 1) % items.length]
+    next.focus({ preventScroll: true })
+    return
+  }
+  // Enter 直接执行当前高亮项，不依赖浏览器给按钮合成的 click
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    const item = document.activeElement
+    if (item && item.classList?.contains('context-menu-item') && !item.disabled) item.click()
+    return
+  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    const items = [...contextMenuList.querySelectorAll('.context-menu-item:not(:disabled)')]
+    if (!items.length) return
+    const index = items.indexOf(document.activeElement)
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    const next = items[(index + step + items.length) % items.length]
+    next.focus({ preventScroll: true })
+  }
+})
+
+// 右键按下前先记下选区：ProseMirror 处理右键时可能把整格选中收成光标。
+// 整格选中额外记下每个选中的单元格在文档里的范围（CellSelection 的 from/to 只覆盖
+// 一个角，而且选区一变表格 DOM 会重建，不能按节点身份认）
+document.addEventListener('mousedown', (event) => {
+  if (event.button !== 2) return
+  const state = editor.state
+  const selection = state.selection
+  if (selection.empty) {
+    contextMenuAnchor = null
+    return
+  }
+  const cells = []
+  for (const cell of editor.view.dom.querySelectorAll('td.selectedCell, th.selectedCell')) {
+    try {
+      const from = editor.view.posAtDOM(cell, 0)
+      const node = state.doc.nodeAt(from)
+      if (node) cells.push({ from, to: from + node.nodeSize })
+    } catch {
+      // 换算不出来就只按选区范围判断
+    }
+  }
+  contextMenuAnchor = { selection, cells }
+}, true)
+
+// 点菜单外面、滚动工作区、窗口失焦都关掉菜单（键盘 Esc 在上面的分层里处理）
+document.addEventListener('mousedown', (event) => {
+  if (!isContextMenuOpen()) return
+  if (event.target.closest?.('#contextMenu')) return
+  closeContextMenu(false)
+}, true)
+
+workspaceEl.addEventListener('scroll', () => closeContextMenu(false), { passive: true })
+
+window.addEventListener('blur', () => closeContextMenu(false))
+
 /* ---------------- 表格属性 ---------------- */
 
 document.querySelector('#tableBorderSize').addEventListener('change', (e) => {
@@ -807,6 +1188,30 @@ function isFormTarget (target) {
   return !!target?.closest?.('input, select, textarea')
 }
 
+/* ---------------- 封堵刷新 ---------------- */
+
+// 页面重载会直接丢掉未保存的内容，刷新和后退对写字板没有任何用处。
+// 在捕获阶段只 preventDefault，不 stopPropagation：正文里的 Ctrl+R 还要继续
+// 走到下面的「右对齐」分支，查找框、下拉框里的 Ctrl+R 则由那边自己忽略。
+const REFRESH_KEY_NAMES = new Set(['BrowserBack', 'BrowserForward', 'BrowserRefresh'])
+
+function isRefreshKey (event) {
+  if (REFRESH_KEY_NAMES.has(event.key)) return true
+  if (event.key === 'F5') return true
+  // Windows 的后退 / 前进是 Alt+← / Alt+→；Mac 上 ⌥← 是「按词移动光标」，不能拦
+  if (!isMac && event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) return true
+  if (!isMod(event) || event.altKey || event.key.toLowerCase() !== 'r') return false
+  // 正文里的 Ctrl+R 是「右对齐」：只放过这一个组合，交给下面的快捷键分支；
+  // Ctrl+Shift+R 在编辑器里也照样拦，不然 debug 构建里浏览器还会重载
+  return event.shiftKey || !editor.view.dom.contains(event.target)
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+  if (!isRefreshKey(event)) return
+  event.preventDefault()
+}, true)
+
 // TipTap 自带 Mod-e（行内代码）和 Mod-Enter（换行），与 Word 的居中/分页冲突，
 // 在捕获阶段先截住，避免编辑器快捷键抢先处理。
 document.addEventListener('keydown', (e) => {
@@ -834,6 +1239,12 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
     // 有模态对话框时交给对话框自己处理，Esc 只关最上层
     if (!document.querySelector('dialog[open]')) {
+      // 右键菜单比查找栏更靠上：先关菜单，查找栏留到下一次 Esc
+      if (isContextMenuOpen()) {
+        e.preventDefault()
+        closeContextMenu(true)
+        return
+      }
       if (!findBar.hidden) {
         e.preventDefault()
         closeFind()
@@ -841,6 +1252,13 @@ document.addEventListener('keydown', (e) => {
       }
       closePopovers()
     }
+  }
+  // Shift+F10 / 菜单键：在当前光标处弹出右键菜单
+  if ((e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) && !e.isComposing && e.keyCode !== 229) {
+    if (document.querySelector('dialog[open]')) return
+    e.preventDefault()
+    openContextMenuFromKeyboard()
+    return
   }
   if (e.isComposing || e.defaultPrevented) return
 
