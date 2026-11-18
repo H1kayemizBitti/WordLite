@@ -1717,6 +1717,78 @@ pub fn run() {
                                 results.imageEditOk = false;
                                 results.imageEditError = String(imageEditError);
                             }}
+                            // V5b：裁剪交互——数据映射（宽=原宽×未裁掉比例）、应用/取消的还原语义
+                            try {{
+                                const edCrop = editorEl.editor;
+                                const hook = window.__wlImageEditor;
+                                edCrop.chain().focus().setContent(
+                                    '<p>裁剪检查</p><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width="240" height="180">'
+                                ).run();
+                                await new Promise((resolve) => setTimeout(resolve, 300));
+                                const cropImg = editorEl.querySelector('img');
+                                const cropPos = cropImg ? edCrop.view.posAtDOM(cropImg, 0) : null;
+                                results.cropEditHook = !!(hook && cropPos != null && hook.crop);
+                                if (hook && cropPos != null && hook.crop) {{
+                                    hook.open(cropPos);
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    hook.crop();
+                                    await new Promise((r) => setTimeout(r, 200));
+                                    results.cropModeEntered = hook.isCropping();
+                                    results.cropOverlayOpen = !document.querySelector('#cropOverlay').hidden;
+                                    // 遮罩和图片对齐：四块暗色都在图片矩形里
+                                    const cropBox = cropImg.getBoundingClientRect();
+                                    const shadeSum = [...document.querySelectorAll('.crop-shade')]
+                                        .reduce((sum, part) => {{
+                                            const box = part.getBoundingClientRect();
+                                            return sum + box.width * box.height;
+                                        }}, 0);
+                                    results.cropShadesCoverImage = shadeSum <= cropBox.width * cropBox.height + 4;
+                                    // 应用 20%/15% 裁剪：宽 = 240 × (1 - 40%)、高 = 180 × (1 - 30%)
+                                    hook.setCropDraft({{ top: 15, right: 20, bottom: 15, left: 20 }});
+                                    await new Promise((r) => setTimeout(r, 150));
+                                    const beforeApply = hook.historyState();
+                                    hook.applyCrop();
+                                    await new Promise((r) => setTimeout(r, 300));
+                                    const cropAttrs = edCrop.getJSON().content.find((n) => n.type === 'image').attrs;
+                                    results.cropApplied = !hook.isCropping();
+                                    results.cropData = {{ width: cropAttrs.width, height: cropAttrs.height, crop: cropAttrs.crop }};
+                                    results.cropSizeFollowsCrop = cropAttrs.width === 144 && cropAttrs.height === 126;
+                                    results.cropPercentStored = Number(cropAttrs.crop?.left || 0) === 20 &&
+                                        Number(cropAttrs.crop?.top || 0) === 15;
+                                    // 先完成，再看撤销一步是否把裁剪一起收回
+                                    hook.finish();
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    const depthFinish = hook.historyState().undo;
+                                    edCrop.commands.undo();
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    const undoneCrop = edCrop.getJSON().content.find((n) => n.type === 'image').attrs;
+                                    results.cropUndoRestored = undoneCrop.width === 240 && undoneCrop.height === 180 &&
+                                        Number(undoneCrop.crop?.left || 0) === 0;
+                                    results.cropOneStep = depthFinish === beforeApply.undo + 1;
+                                    // 取消路径：进了裁剪改了框再 Esc，文档一点不动
+                                    hook.open(cropPos);
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    hook.crop();
+                                    await new Promise((r) => setTimeout(r, 200));
+                                    hook.setCropDraft({{ top: 30, right: 0, bottom: 0, left: 30 }});
+                                    await new Promise((r) => setTimeout(r, 150));
+                                    const beforeCancel = hook.historyState();
+                                    hook.cancelCrop();
+                                    await new Promise((r) => setTimeout(r, 200));
+                                    const cancelCropAttrs = edCrop.getJSON().content.find((n) => n.type === 'image').attrs;
+                                    results.cropCancelKept = !hook.isCropping() &&
+                                        hook.historyState().undo === beforeCancel.undo &&
+                                        Number(cancelCropAttrs.crop?.left || 0) === 0 && hook.isEditing();
+                                    hook.cancel();
+                                    await new Promise((r) => setTimeout(r, 200));
+                                    results.cropOk = results.cropModeEntered && results.cropOverlayOpen &&
+                                        results.cropSizeFollowsCrop && results.cropPercentStored &&
+                                        results.cropUndoRestored && results.cropOneStep && results.cropCancelKept;
+                                }}
+                            }} catch (cropError) {{
+                                results.cropOk = false;
+                                results.cropError = String(cropError);
+                            }}
                             results.state = 'ok';
                         }} catch (error) {{
                             results.error = String(error);

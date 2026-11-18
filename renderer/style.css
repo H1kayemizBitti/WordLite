@@ -923,8 +923,47 @@ body.file-drag-over::after {
    只是工作区多出可以横向滚动的余量，用来把被面板挡住的图片滚回面板左边 */
 #workspace.image-edit-mode { padding: 32px 300px 72px; }
 
+/* 裁剪交互层（V5b）：固定定位，坐标每次按图片外框重算。
+   图片本身只露出裁剪后的部分，这里在上面铺一张完整原图，框里像素和下面重合，
+   四周用 4 块暗色盖住裁掉的部分；框上有 4 边 + 4 角共 8 个手柄（热区 8px）。 */
+.crop-overlay { position: fixed; inset: 0; z-index: 46; }
+.crop-overlay[hidden] { display: none; }
+.crop-image { position: absolute; pointer-events: none; user-select: none; }
+.crop-shade { position: absolute; background: rgba(16, 24, 40, 0.55); pointer-events: none; }
+.crop-frame { position: absolute; box-sizing: border-box; outline: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25); }
+.crop-frame:focus { outline: 2px solid var(--accent); }
+.crop-edge, .crop-handle {
+  position: absolute;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid var(--accent);
+  pointer-events: auto;
+}
+/* 边：细长条，热区 8px */
+.crop-edge { z-index: 2; }
+.crop-edge[data-handle="top"], .crop-edge[data-handle="bottom"] {
+  left: 8px; right: 8px; height: 8px; margin-top: -4px;
+}
+.crop-edge[data-handle="top"] { top: 0; cursor: ns-resize; }
+.crop-edge[data-handle="bottom"] { top: 100%; cursor: ns-resize; }
+.crop-edge[data-handle="left"], .crop-edge[data-handle="right"] {
+  top: 8px; bottom: 8px; width: 8px; margin-left: -4px;
+}
+.crop-edge[data-handle="left"] { left: 0; cursor: ew-resize; }
+.crop-edge[data-handle="right"] { left: 100%; cursor: ew-resize; }
+/* 角：8×8 方块。用外边距把中心对到角上 */
+.crop-handle { width: 8px; height: 8px; margin: -4px 0 0 -4px; z-index: 3; }
+.crop-handle[data-handle="top-left"] { left: 0; top: 0; cursor: nwse-resize; }
+.crop-handle[data-handle="top-right"] { left: 100%; top: 0; cursor: nesw-resize; }
+.crop-handle[data-handle="bottom-left"] { left: 0; top: 100%; cursor: nesw-resize; }
+.crop-handle[data-handle="bottom-right"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.crop-edge:focus, .crop-handle:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 裁剪状态里图片主体不参与拖动缩放，手柄由裁剪层负责 */
+.ProseMirror [data-resize-container].image-cropping [data-resize-handle] { display: none !important; }
+.ProseMirror [data-resize-container].image-cropping img { cursor: default; }
+
 @media print {
-  .image-dim, .image-panel { display: none !important; }
+  .image-dim, .image-panel, .crop-overlay { display: none !important; }
   #workspace.image-edit-mode { padding: 0 !important; }
   .ProseMirror [data-resize-container].image-editing [data-resize-wrapper] { outline: none !important; }
 }

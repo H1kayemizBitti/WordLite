@@ -332,6 +332,24 @@
   <div class="image-dim-part" data-side="left"></div>
   <div class="image-dim-part" data-side="right"></div>
 </div>
+<!-- 裁剪交互层：固定定位，坐标每次按图片外框重算；遮罩只盖图片本身的范围 -->
+<div class="crop-overlay" id="cropOverlay" hidden>
+  <img class="crop-image" id="cropImage" alt="" aria-hidden="true">
+  <div class="crop-shade" data-shade="top"></div>
+  <div class="crop-shade" data-shade="bottom"></div>
+  <div class="crop-shade" data-shade="left"></div>
+  <div class="crop-shade" data-shade="right"></div>
+  <div class="crop-frame" id="cropFrame" tabindex="-1">
+    <div class="crop-edge" data-handle="top" tabindex="0" aria-label="上边：拖动或方向键调整"></div>
+    <div class="crop-edge" data-handle="right" tabindex="0" aria-label="右边：拖动或方向键调整"></div>
+    <div class="crop-edge" data-handle="bottom" tabindex="0" aria-label="下边：拖动或方向键调整"></div>
+    <div class="crop-edge" data-handle="left" tabindex="0" aria-label="左边：拖动或方向键调整"></div>
+    <div class="crop-handle" data-handle="top-left" tabindex="0" aria-label="左上角：拖动或方向键调整"></div>
+    <div class="crop-handle" data-handle="top-right" tabindex="0" aria-label="右上角：拖动或方向键调整"></div>
+    <div class="crop-handle" data-handle="bottom-left" tabindex="0" aria-label="左下角：拖动或方向键调整"></div>
+    <div class="crop-handle" data-handle="bottom-right" tabindex="0" aria-label="右下角：拖动或方向键调整"></div>
+  </div>
+</div>
 <aside class="image-panel" id="imagePanel" role="dialog" aria-modal="false" aria-label="图片编辑" hidden>
   <div class="image-panel-head">
     <h2>图片编辑</h2>
@@ -374,6 +392,17 @@
     </section>
     <section class="image-section">
       <div class="field-title">裁剪</div>
+      <div class="panel-row">
+        <button class="tbtn" id="btnPanelCropMode" type="button" aria-label="进入裁剪（C）">裁剪…</button>
+        <select id="panelCropRatio" class="select" aria-label="裁剪比例">
+          <option value="free">自由</option>
+          <option value="natural">原图比例</option>
+          <option value="1:1">1:1</option>
+          <option value="4:3">4:3</option>
+          <option value="16:9">16:9</option>
+          <option value="3:4">3:4</option>
+        </select>
+      </div>
       <div class="panel-row panel-crop-row">
         <label for="panelCropTop">上</label>
         <input id="panelCropTop" class="num-input" type="number" min="0" max="95" step="1" aria-label="上边裁剪百分比"><span class="panel-unit">%</span>
@@ -521,6 +550,7 @@
       <ul class="help-list">
         <li>功能区分为「开始 / 插入 / 布局 / 文件 / 更多」，常用操作都在「开始」。</li>
         <li>双击图片（或选中后按 Enter）打开右侧编辑面板；改宽度、环绕时正文实时重排，按 Ctrl+Enter 完成、Esc 取消。</li>
+        <li>图片面板里点「裁剪…」或按 C 进裁剪：图片露出完整原图，拖四边四角调框，可按自由 / 原图 / 1:1 / 4:3 / 16:9 / 3:4 锁定比例；Enter 应用、Esc 取消，手柄可用 Tab 聚焦、方向键每次 1px（Shift 10px）。</li>
         <li>Ctrl+F 查找、Ctrl+H 替换；F1 随时打开帮助。</li>
       </ul>
 
@@ -541,6 +571,7 @@
       <ul class="help-list">
         <li>DOCX 中的文本框、嵌套表格、复杂域会被简化。</li>
         <li>图片文字环绕支持嵌入型、四周型（左 / 右）和上下型。</li>
+        <li>裁剪只改显示范围，原图完整保留（文件不会变小），导出的 DOCX 裁剪数据与这里一致。</li>
         <li>打印分页以分页符为准，长段落自动换页位置可能与屏幕略有差异。</li>
       </ul>
     </section>

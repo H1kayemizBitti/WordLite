@@ -843,7 +843,19 @@ window.__wlImageEditor = {
   open: (pos) => openImageEditor(pos),
   finish: () => finishImageEditing(),
   cancel: () => cancelImageEditing(),
-  panel: () => imagePanel
+  panel: () => imagePanel,
+  isCropping: () => inCropMode(),
+  crop: () => enterCropMode(),
+  applyCrop: () => applyCropMode(),
+  cancelCrop: () => cancelCropMode(),
+  setCropDraft: (draft) => {
+    if (!inCropMode()) return false
+    imageEdit.crop.draft = { ...imageEdit.crop.draft, ...draft }
+    syncCropOverlay()
+    return true
+  },
+  setCropRatio: (mode) => setCropRatio(mode),
+  cropDraft: () => currentCropDraft()
 }
 
 // 三种入口（双击 / 选中后 Enter / 右键「图片设置…」）都走这一个函数
@@ -887,7 +899,8 @@ function openImageEditor (pos = null) {
   requestAnimationFrame(() => {
     if (!imageEdit) return
     revealImageAbovePanel(imageEdit.pos, paperLeftBefore)
-    syncImageDim()
+    if (inCropMode()) syncCropOverlay()
+    else syncImageDim()
     panelWidthInput.focus({ preventScroll: true })
   })
   showStatus(`正在编辑图片：${isMac ? '⌘↵' : 'Ctrl+Enter'} 完成，Esc 取消`, 0)
@@ -896,7 +909,8 @@ function openImageEditor (pos = null) {
 function onImageDimWheel (event) {
   // 遮罩盖在正文上，滚轮要转给工作区
   workspaceEl.scrollTop += event.deltaY
-  syncImageDim()
+  if (inCropMode()) syncCropOverlay()
+  else syncImageDim()
 }
 
 // 实时预览：一帧最多写一次；连续 3 帧超过 50ms 就降级成松手 / 失焦才应用
@@ -930,7 +944,8 @@ function applyImagePreview (attrs) {
   if (!node || node.type.name !== 'image') return
   // addToHistory:false：预览不进撤销栈，完成时才合成一步
   editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...node.attrs, ...attrs }).setMeta('addToHistory', false))
-  syncImageDim()
+  if (inCropMode()) syncCropOverlay()
+  else syncImageDim()
 }
 
 function flushImagePreview () {
@@ -1027,6 +1042,370 @@ for (const side of ['top', 'right', 'bottom', 'left']) {
   panelCropInputs[side].addEventListener('blur', flushImagePreview)
 }
 
+/* ---------------- 裁剪交互（V5b） ---------------- */
+
+// 裁剪状态里图片显示完整原图：节点视图本来只露裁掉后的部分，
+// 所以这里在图片上层按同一比例铺一张完整原图，再把裁剪框和四周暗色盖上去。
+// 框里的像素和下面完全重合，看到的只是“多出来一圈”。
+const cropOverlay = document.querySelector('#cropOverlay')
+const cropFrameEl = document.querySelector('#cropFrame')
+const cropImageEl = document.querySelector('#cropImage')
+const cropRatioSelect = document.querySelector('#panelCropRatio')
+const CROP_MIN_PX = 10
+
+let cropDrag = null
+
+function inCropMode () {
+  return !!imageEdit?.crop
+}
+
+function currentCropDraft () {
+  const crop = imageEdit?.crop?.draft
+  return crop ? { ...crop } : { top: 0, right: 0, bottom: 0, left: 0 }
+}
+
+function cropAspect () {
+  const mode = imageEdit?.crop?.ratio
+  if (!mode || mode === 'free') return null
+  if (mode === 'natural') {
+    const img = imageImgEl(imageEdit.pos)
+    if (img?.naturalWidth && img?.naturalHeight) return img.naturalWidth / img.naturalHeight
+    const attrs = editor.state.doc.nodeAt(imageEdit.pos)?.attrs || {}
+    const width = attrNumber(attrs.width)
+    const height = attrNumber(attrs.height)
+    return width && height ? width / height : null
+  }
+  const [a, b] = mode.split(':')
+  const aspect = Number(a) / Number(b)
+  return aspect > 0 ? aspect : null
+}
+
+// 百分比 ↔ 图片上的像素：框的边都相对完整原图的矩形算
+function draftFromEdges (edges, rect) {
+  const clampPct = (value) => Math.min(100, Math.max(0, value))
+  return {
+    left: clampPct(edges.left / rect.width * 100),
+    right: clampPct((rect.width - edges.right) / rect.width * 100),
+    top: clampPct(edges.top / rect.height * 100),
+    bottom: clampPct((rect.height - edges.bottom) / rect.height * 100)
+  }
+}
+
+function edgesFromDraft (draft, rect) {
+  return {
+    left: rect.width * draft.left / 100,
+    top: rect.height * draft.top / 100,
+    right: rect.width * (1 - draft.right / 100),
+    bottom: rect.height * (1 - draft.bottom / 100)
+  }
+}
+
+function enterCropMode () {
+  if (!imageEdit || imageEdit.crop) return
+  // 起始裁剪框 = 面板里当前的四个百分比（也就是文档当前的裁剪）
+  const draft = {}
+  for (const side of ['top', 'right', 'bottom', 'left']) {
+    draft[side] = clamp(panelCropInputs[side].value, 0, 95, 0)
+  }
+  imageEdit.crop = {
+    draft,
+    ratio: 'free',
+    rect: null,
+    // 进裁剪前面板里的「完整原图尺寸」：应用裁剪后回到这个值，
+    // 可见尺寸自然按裁掉的比例缩小（和 Word 一样，裁多少小多少）
+    fullWidth: clamp(panelWidthInput.value, 8, 5000, 0) || 0,
+    fullHeight: clamp(panelHeightInput.value, 8, 5000, 0) || 0
+  }
+  cropRatioSelect.value = 'free'
+  const attrs = editor.state.doc.nodeAt(imageEdit.pos)?.attrs
+  cropImageEl.src = attrs?.src || ''
+  // 编辑态的变暗层让位给裁剪自己的遮罩
+  imageDim.hidden = true
+  cropOverlay.hidden = false
+  imageFrameEl(imageEdit.pos)?.classList.add('image-cropping')
+  cropOverlay.addEventListener('wheel', onImageDimWheel, { passive: true })
+  syncCropOverlay()
+  requestAnimationFrame(() => {
+    if (!inCropMode()) return
+    syncCropOverlay()
+    cropFrameEl.focus({ preventScroll: true })
+  })
+  showStatus(`裁剪中：拖边角或方向键调整，Enter 应用，Esc 取消`, 0)
+}
+
+function leaveCropMode () {
+  if (!imageEdit?.crop) return
+  if (cropDrag) endCropDrag()
+  imageEdit.crop = null
+  cropOverlay.hidden = true
+  cropOverlay.removeEventListener('wheel', onImageDimWheel)
+  for (const frame of document.querySelectorAll('.ProseMirror [data-resize-container].image-cropping')) {
+    frame.classList.remove('image-cropping')
+  }
+  imageDim.hidden = true
+  syncImageDim()
+  if (imageEdit) cropRatioSelect.value = 'free'
+}
+
+// 应用：回到编辑状态，裁剪百分比写回面板 → 走同一条实时预览，
+// width/height 仍按 V3 的「可见区域 = 原尺寸 × 未裁掉的比例」重算
+function applyCropMode () {
+  if (!inCropMode()) return false
+  const draft = currentCropDraft()
+  const crop = {}
+  for (const side of ['top', 'right', 'bottom', 'left']) crop[side] = Math.round(draft[side])
+  if (crop.top + crop.bottom >= 100 || crop.left + crop.right >= 100) {
+    // 极端小图兜底：至少留一条边
+    if (crop.top + crop.bottom >= 100) crop.bottom = Math.max(0, 99 - crop.top)
+    if (crop.left + crop.right >= 100) crop.right = Math.max(0, 99 - crop.left)
+  }
+  // 面板尺寸框保持进裁剪前的完整尺寸；写进文档的可见尺寸由 panelAttributes 按
+  // 「可见 = 完整 × 未裁掉的比例」算出来，所以裁多少就小多少
+  if (imageEdit.crop?.fullWidth > 0) panelWidthInput.value = Math.round(imageEdit.crop.fullWidth)
+  if (imageEdit.crop?.fullHeight > 0) panelHeightInput.value = Math.round(imageEdit.crop.fullHeight)
+  leaveCropMode()
+  for (const side of ['top', 'right', 'bottom', 'left']) panelCropInputs[side].value = crop[side]
+  updatePanelFromInputs()
+  flushImagePreview()
+  showStatus('已应用裁剪', 4000)
+  return true
+}
+
+function cancelCropMode () {
+  if (!inCropMode()) return
+  leaveCropMode()
+  // 面板里那四个百分比一直没动，裁剪前的样子还在
+  const attrs = editor.state.doc.nodeAt(imageEdit.pos)?.attrs || {}
+  for (const side of ['top', 'right', 'bottom', 'left']) {
+    panelCropInputs[side].value = Number(attrs.crop?.[side]) || 0
+  }
+  showStatus('已取消裁剪', 4000)
+}
+
+function syncCropOverlay () {
+  if (!inCropMode()) return
+  const img = imageImgEl(imageEdit.pos)
+  if (!img) return
+  const box = img.getBoundingClientRect()
+  if (!box.width || !box.height) return
+  const rect = { left: box.left, top: box.top, width: box.width, height: box.height }
+  imageEdit.crop.rect = rect
+  cropImageEl.style.left = `${rect.left}px`
+  cropImageEl.style.top = `${rect.top}px`
+  cropImageEl.style.width = `${rect.width}px`
+  cropImageEl.style.height = `${rect.height}px`
+  const edges = edgesFromDraft(imageEdit.crop.draft, rect)
+  const frame = {
+    left: rect.left + edges.left,
+    top: rect.top + edges.top,
+    width: Math.max(1, edges.right - edges.left),
+    height: Math.max(1, edges.bottom - edges.top)
+  }
+  cropFrameEl.style.left = `${frame.left}px`
+  cropFrameEl.style.top = `${frame.top}px`
+  cropFrameEl.style.width = `${frame.width}px`
+  cropFrameEl.style.height = `${frame.height}px`
+  const right = frame.left + frame.width
+  const bottom = frame.top + frame.height
+  const shades = {
+    top: [rect.left, rect.top, rect.width, frame.top - rect.top],
+    bottom: [rect.left, bottom, rect.width, rect.top + rect.height - bottom],
+    left: [rect.left, frame.top, frame.left - rect.left, frame.height],
+    right: [right, frame.top, rect.left + rect.width - right, frame.height]
+  }
+  for (const part of cropOverlay.querySelectorAll('.crop-shade')) {
+    const r = shades[part.dataset.shade]
+    part.style.left = `${r[0]}px`
+    part.style.top = `${r[1]}px`
+    part.style.width = `${Math.max(0, r[2])}px`
+    part.style.height = `${Math.max(0, r[3])}px`
+  }
+}
+
+// 拖边 / 拖角：先按像素算边，再按比例约束，最后转回百分比。
+// 拖角时对角固定（锚点），拖边时只动那一条边；固定比例下另一边跟着比例走：
+// 拖左右边高度围绕中心，拖上下边宽度围绕中心。
+function dragCropEdges (handle, base, dx, dy, rect) {
+  const aspect = cropAspect()
+  const W = rect.width
+  const H = rect.height
+  const minW = Math.min(CROP_MIN_PX, W)
+  const minH = Math.min(CROP_MIN_PX, H)
+  // 只数边：角的两条边都在，拖角时对角固定
+  const movesLeft = handle === 'left' || handle === 'top-left' || handle === 'bottom-left'
+  const movesRight = handle === 'right' || handle === 'top-right' || handle === 'bottom-right'
+  const movesTop = handle === 'top' || handle === 'top-left' || handle === 'top-right'
+  const movesBottom = handle === 'bottom' || handle === 'bottom-left' || handle === 'bottom-right'
+  let left = base.left
+  let right = base.right
+  let top = base.top
+  let bottom = base.bottom
+  if (movesLeft) left = clamp(left + dx, 0, right - minW, left)
+  if (movesRight) right = clamp(right + dx, left + minW, W, right)
+  if (movesTop) top = clamp(top + dy, 0, bottom - minH, top)
+  if (movesBottom) bottom = clamp(bottom + dy, top + minH, H, bottom)
+  if (!aspect) return { left, right, top, bottom }
+
+  if ((movesLeft || movesRight) && (movesTop || movesBottom)) {
+    // 角：对角是锚点，宽先定，高按比例跟上，再受画框和最小尺寸约束
+    const anchorX = movesLeft ? base.right : base.left
+    const anchorY = movesTop ? base.bottom : base.top
+    const maxW = movesLeft ? anchorX : W - anchorX
+    const maxH = movesTop ? anchorY : H - anchorY
+    let width = Math.min(right - left, maxW, maxH * aspect)
+    width = Math.max(width, Math.min(minW, maxW), Math.min(minH * aspect, maxW))
+    let height = width / aspect
+    if (height > maxH) { height = maxH; width = height * aspect }
+    left = movesLeft ? anchorX - width : anchorX
+    right = movesLeft ? anchorX : anchorX + width
+    top = movesTop ? anchorY - height : anchorY
+    bottom = movesTop ? anchorY : anchorY + height
+    return { left, right, top, bottom }
+  }
+  if (movesLeft || movesRight) {
+    // 左右边：高度围绕原框中心缩放
+    let width = right - left
+    let height = width / aspect
+    if (height > H) { height = H; width = height * aspect }
+    const center = (base.top + base.bottom) / 2
+    top = clamp(center - height / 2, 0, H - height, top)
+    bottom = top + height
+    // 被拖的边已经夹在画框里；另一条边跟着宽度走，可能贴出画框，这里再收一次
+    if (movesLeft) {
+      right = left + width
+      if (right > W) { right = W; width = right - left; height = width / aspect; bottom = top + height }
+    } else {
+      left = right - width
+      if (left < 0) { left = 0; width = right - left; height = width / aspect; bottom = top + height }
+    }
+    return { left, right, top, bottom }
+  }
+  // 上下边：宽度围绕原框中心缩放
+  let height = bottom - top
+  let width = height * aspect
+  if (width > W) { width = W; height = width / aspect }
+  const center = (base.left + base.right) / 2
+  left = clamp(center - width / 2, 0, W - width, left)
+  right = left + width
+  if (movesTop) {
+    bottom = top + height
+    if (bottom > H) { bottom = H; height = bottom - top; width = height * aspect; right = left + width }
+  } else {
+    top = bottom - height
+    if (top < 0) { top = 0; height = bottom - top; width = height * aspect; left = right - width }
+  }
+  return { left, right, top, bottom }
+}
+
+function onCropDragMove (event) {
+  if (!cropDrag) return
+  const rect = cropDrag.rect
+  const dx = event.clientX - cropDrag.startX
+  const dy = event.clientY - cropDrag.startY
+  const edges = dragCropEdges(cropDrag.handle, cropDrag.base, dx, dy, rect)
+  imageEdit.crop.draft = draftFromEdges(edges, rect)
+  syncCropOverlay()
+}
+
+function endCropDrag () {
+  if (!cropDrag) return
+  cropDrag = null
+  document.removeEventListener('pointermove', onCropDragMove)
+  document.removeEventListener('pointerup', endCropDrag)
+  document.removeEventListener('pointercancel', endCropDrag)
+}
+
+cropOverlay.addEventListener('pointerdown', (event) => {
+  if (!inCropMode()) return
+  // 遮罩和框内都吞掉点击，裁剪状态里不让下面的正文跟着动
+  event.preventDefault()
+  const handle = event.target.closest?.('[data-handle]')
+  if (!handle || !imageEdit.crop.rect) {
+    cropFrameEl.focus({ preventScroll: true })
+    return
+  }
+  const rect = imageEdit.crop.rect
+  cropDrag = {
+    handle: handle.dataset.handle,
+    startX: event.clientX,
+    startY: event.clientY,
+    base: edgesFromDraft(currentCropDraft(), rect),
+    rect
+  }
+  handle.setPointerCapture?.(event.pointerId)
+  document.addEventListener('pointermove', onCropDragMove)
+  document.addEventListener('pointerup', endCropDrag)
+  document.addEventListener('pointercancel', endCropDrag)
+  handle.focus({ preventScroll: true })
+})
+
+// 手柄的方向键：每次 1px，Shift 10px
+function nudgeCropHandle (handle, key, step) {
+  if (!inCropMode() || !imageEdit.crop.rect) return
+  const rect = imageEdit.crop.rect
+  const base = edgesFromDraft(currentCropDraft(), rect)
+  const dx = key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0
+  const dy = key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0
+  const edges = dragCropEdges(handle, base, dx, dy, rect)
+  imageEdit.crop.draft = draftFromEdges(edges, rect)
+  syncCropOverlay()
+}
+
+cropOverlay.addEventListener('keydown', (event) => {
+  if (!inCropMode()) return
+  const handle = event.target.closest?.('[data-handle]')
+  if (!handle) {
+    // 焦点在裁剪框本身（Tab 循环会落在这里）：方向键一并挪「右下角」，
+    // 这样焦点进到裁剪层就立刻能操作，不用先去抓某个手柄
+    if (event.target !== cropFrameEl) return
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+    event.preventDefault()
+    event.stopPropagation()
+    nudgeCropHandle('bottom-right', event.key, event.shiftKey ? 10 : 1)
+    return
+  }
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+  event.preventDefault()
+  event.stopPropagation()
+  nudgeCropHandle(handle.dataset.handle, event.key, event.shiftKey ? 10 : 1)
+})
+
+// 比例切换：以当前裁剪框中心为基准，取能放进原图的最大框
+function setCropRatio (mode) {
+  if (!inCropMode()) return
+  const crop = imageEdit.crop
+  crop.ratio = mode
+  const aspect = cropAspect()
+  if (!aspect) {
+    syncCropOverlay()
+    return
+  }
+  const rect = crop.rect
+  if (!rect) return
+  const draft = currentCropDraft()
+  const centerX = (draft.left + (100 - draft.right)) / 2
+  const centerY = (draft.top + (100 - draft.bottom)) / 2
+  // 能放进原图的最大框：高度取「画框高」和「画框宽 ÷ 比例」中小的那个
+  const height = Math.min(rect.height, rect.width / aspect)
+  const width = height * aspect
+  const left = Math.min(Math.max(0, rect.width * centerX / 100 - width / 2), rect.width - width)
+  const top = Math.min(Math.max(0, rect.height * centerY / 100 - height / 2), rect.height - height)
+  crop.draft = draftFromEdges({ left, top, right: left + width, bottom: top + height }, rect)
+  syncCropOverlay()
+}
+
+cropRatioSelect.addEventListener('change', () => {
+  if (!inCropMode()) {
+    // 比例只在裁剪状态里有意义；面板里提前改就退回去
+    cropRatioSelect.value = 'free'
+    return
+  }
+  setCropRatio(cropRatioSelect.value)
+})
+
+document.querySelector('#btnPanelCropMode').addEventListener('click', () => enterCropMode())
+
+
 function resetPanelSizeToNatural () {
   if (!imageEdit) return
   const img = imageImgEl(imageEdit.pos)
@@ -1101,6 +1480,8 @@ function onEditorBackdropClick () {
 // 完成：先不进历史地恢复原属性，再用一个进历史的事务写入最终属性 → 一次编辑只占一步撤销
 function finishImageEditing () {
   if (!imageEdit) return
+  // 还在裁剪里就先把裁剪落定（Enter 应用、Ctrl+Enter 也是一路到底）
+  if (inCropMode()) applyCropMode()
   const { pos, original, dirty: beforeDirty } = imageEdit
   flushImagePreview()
   const node = editor.state.doc.nodeAt(pos)
@@ -1144,6 +1525,8 @@ function imageAttrsChanged (before, after) {
 // 只收界面：属性还原由调用方按自己的语义先做掉
 function closeImageEditorUI () {
   if (!imageEdit) return
+  // 裁剪层还没有落定就跟着一起收掉（取消编辑 = 裁剪也取消）
+  if (inCropMode()) leaveCropMode()
   // 退出时把横向滚动和补出来的内边距一起收掉，纸张回到进编辑前的位置
   const paperLeftBefore = document.querySelector('.paper')?.getBoundingClientRect().left ?? null
   if (imagePreviewFrame) cancelAnimationFrame(imagePreviewFrame)
@@ -1182,10 +1565,38 @@ function closeImageEditor () {
 function onImagePanelKeydown (event) {
   if (!imageEdit) return
   if (event.isComposing || event.keyCode === 229) return
+  // 裁剪状态是 Esc 分层里的最上一层：先退出裁剪，面板留着
+  if (event.key === 'Escape' && inCropMode()) {
+    event.preventDefault()
+    event.stopPropagation()
+    cancelCropMode()
+    return
+  }
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
     cancelImageEditing()
+    return
+  }
+  // 裁剪状态下 Enter = 应用裁剪（Ctrl+Enter = 应用并完成，交给下面的分支）
+  if (inCropMode()) {
+    if (event.key === 'Enter' && !isMod(event) && !isFormTarget(event.target)) {
+      event.preventDefault()
+      event.stopPropagation()
+      applyCropMode()
+      return
+    }
+    if ((event.key === 'c' || event.key === 'C') && !isMod(event) && !isFormTarget(event.target)) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+  }
+  // 编辑状态按 C 进裁剪
+  if ((event.key === 'c' || event.key === 'C') && !isMod(event) && !isFormTarget(event.target) && !event.altKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    enterCropMode()
     return
   }
   if (event.key === 'Enter' && isMod(event)) {
@@ -1202,8 +1613,16 @@ function onImagePanelKeydown (event) {
     return
   }
   if (event.key === 'Tab') {
-    const items = [...imagePanel.querySelectorAll('button, input, select')].filter((el) => !el.disabled)
+    // 裁剪时焦点在遮罩上的手柄之间循环，手柄也要能 Tab 到
+    const root = inCropMode() ? cropOverlay : imagePanel
+    const items = [...root.querySelectorAll('button, input, select, [data-handle], [tabindex="0"]')].filter((el) => !el.disabled)
     if (!items.length) return
+    // 焦点在面板里而正在裁剪（面板里的按钮仍可点）时，Tab 直接进裁剪框的手柄
+    if (inCropMode() && !root.contains(document.activeElement)) {
+      event.preventDefault()
+      items[0].focus({ preventScroll: true })
+      return
+    }
     event.preventDefault()
     const index = items.indexOf(document.activeElement)
     const next = event.shiftKey
@@ -1214,10 +1633,14 @@ function onImagePanelKeydown (event) {
 }
 
 workspaceEl.addEventListener('scroll', () => {
-  if (imageEdit) syncImageDim()
+  if (!imageEdit) return
+  if (inCropMode()) syncCropOverlay()
+  else syncImageDim()
 }, { passive: true })
 window.addEventListener('resize', () => {
-  if (imageEdit) syncImageDim()
+  if (!imageEdit) return
+  if (inCropMode()) syncCropOverlay()
+  else syncImageDim()
 })
 
 // 选中图片后按 Enter 也进编辑（和双击、右键菜单同一个入口）
@@ -1306,12 +1729,10 @@ function contextMenuItemsFor (kind, state) {
       {
         label: '裁剪',
         enabled: true,
-        // 面板里「裁剪」区在最下面一组之前，打开后直接落到「上」百分比
+        // 直接进裁剪状态：图片露出完整原图、边框带 8 个手柄
         run: () => {
-          openImageEditor(imagePosFromSelection())
-          const cropTop = document.querySelector('#panelCropTop')
-          cropTop?.focus()
-          cropTop?.select()
+          if (!imageEdit) openImageEditor(imagePosFromSelection())
+          enterCropMode()
         }
       },
       { label: '复制', shortcut: `${modifierLabel}+C`, enabled: true,
