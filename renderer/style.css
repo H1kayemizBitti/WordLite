@@ -767,6 +767,37 @@ body.file-drag-over::after {
   cursor: pointer;
   border: 1px solid transparent;
 }
+.ProseMirror [data-resize-container].ProseMirror-selectednode { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ProseMirror [data-resize-container].ProseMirror-selectednode img.ProseMirror-selectednode { outline: none; }
+/* TipTap 的缩放手柄默认没有尺寸（0×0 抓不到），这里按决策书给 8px 热区 */
+.ProseMirror [data-resize-wrapper] [data-resize-handle] {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border: 1px solid #fff;
+  border-radius: 1px;
+  z-index: 10;
+}
+.ProseMirror [data-resize-wrapper] [data-resize-handle="top-left"] { cursor: nwse-resize; }
+.ProseMirror [data-resize-wrapper] [data-resize-handle="bottom-right"] { cursor: nwse-resize; }
+.ProseMirror [data-resize-wrapper] [data-resize-handle="top-right"] { cursor: nesw-resize; }
+.ProseMirror [data-resize-wrapper] [data-resize-handle="bottom-left"] { cursor: nesw-resize; }
+/* 只有选中图片时才出框和手柄，平时不干扰正文 */
+.ProseMirror [data-resize-wrapper] [data-resize-handle] { display: none; }
+.ProseMirror [data-resize-container].ProseMirror-selectednode [data-resize-wrapper] [data-resize-handle] { display: block; }
+/* 图片主体：可拖动（按在主体上移动，按在手柄上缩放） */
+.ProseMirror [data-resize-container] img { cursor: move; }
+/* 选区跨过图片时给图片加一层遮罩，颜色对齐编辑器选区色。
+   装饰加的 class 落在节点视图的外层容器上，遮罩要盖在图片本体上，所以作用在 wrapper */
+.ProseMirror [data-resize-container].in-selection [data-resize-wrapper]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(43, 95, 208, 0.45);
+  box-shadow: inset 0 0 0 3px var(--accent);
+  pointer-events: none;
+  z-index: 5;
+}
 /* TipTap 的缩放图片外层是块级 flex 容器，对齐和环绕必须作用在容器上 */
 .ProseMirror [data-resize-container] { max-width: 100%; }
 .ProseMirror [data-resize-container]:has(img[data-align="center"]) { justify-content: center; }
@@ -1121,6 +1152,7 @@ body.file-drag-over::after {
   .ProseMirror table, .ProseMirror img { break-inside: avoid; page-break-inside: avoid; }
   /* 图片缩放手柄和选中框也不能印出来 */
   .ProseMirror [data-resize-handle] { display: none !important; }
+  .ProseMirror [data-resize-container].in-selection [data-resize-wrapper]::after { display: none !important; }
   .find-bar { display: none !important; }
   .ProseMirror .find-match { background: transparent !important; box-shadow: none !important; }
 }

@@ -13,6 +13,7 @@ import { EditorState, TextSelection } from '@tiptap/pm/state'
 import {
   FindHighlight,
   findHighlightKey,
+  SelectionImageHighlight,
   imageCropFrame,
   Indent,
   LineHeight,
@@ -248,7 +249,8 @@ const editorExtensions = [
   CharacterCount,
   Placeholder.configure({ placeholder: '开始输入…' }),
   PlainTextInput,
-  FindHighlight
+  FindHighlight,
+  SelectionImageHighlight
 ]
 
 const editor = new Editor({
@@ -367,6 +369,74 @@ workspaceEl.addEventListener('pointerdown', (event) => {
   window.addEventListener('pointerup', blankDragEnd)
   window.addEventListener('pointercancel', blankDragEnd)
   window.addEventListener('blur', blankDragEnd)
+})
+
+/* ---------------- 拖动到边缘自动滚动 ---------------- */
+
+// 正文滚动容器是 #workspace；浏览器原生拖放只管它自己的视口，
+// 这里在拖动过程中按住边缘 40px 以内时自己滚，并在滚动后重算落点竖线
+const DRAG_SCROLL_EDGE = 40
+let dragScrollTimer = 0
+let dragScrollPoint = null
+
+function dragAutoScrollStep () {
+  if (!dragScrollPoint) return 0
+  const rect = workspaceEl.getBoundingClientRect()
+  const { x, y } = dragScrollPoint
+  if (y < rect.top + DRAG_SCROLL_EDGE) {
+    return -Math.min(24, Math.max(6, Math.ceil((rect.top + DRAG_SCROLL_EDGE - y) / 3)))
+  }
+  if (y > rect.bottom - DRAG_SCROLL_EDGE) {
+    return Math.min(24, Math.max(6, Math.ceil((y - rect.bottom + DRAG_SCROLL_EDGE) / 3)))
+  }
+  return 0
+}
+
+function dragAutoScrollTick () {
+  const step = dragAutoScrollStep()
+  if (!step) { dragScrollTimer = 0; return }
+  const before = workspaceEl.scrollTop
+  workspaceEl.scrollTop = before + step
+  // 滚动后光标下的文档位置变了：补一次 dragover，让 Dropcursor 竖线跟到新位置
+  if (workspaceEl.scrollTop !== before && dragScrollPoint) {
+    const { x, y } = dragScrollPoint
+    editor.view.dom.dispatchEvent(new DragEvent('dragover', { clientX: x, clientY: y, bubbles: true, cancelable: true }))
+  }
+  dragScrollTimer = requestAnimationFrame(dragAutoScrollTick)
+}
+
+function dragScrollMove (event) {
+  dragScrollPoint = { x: event.clientX, y: event.clientY }
+  if (!dragScrollTimer && dragAutoScrollStep()) {
+    dragScrollTimer = requestAnimationFrame(dragAutoScrollTick)
+  }
+}
+
+function dragScrollEnd () {
+  dragScrollPoint = null
+  dragScrollTimer = 0
+  editor.view.dom.removeEventListener('dragover', dragScrollMove)
+  document.removeEventListener('dragend', dragScrollEnd)
+  document.removeEventListener('drop', dragScrollEnd)
+}
+
+// ProseMirror 的 mousedown 第一件事就是 endComposition，等 dragstart 再查
+// view.composing 永远是 false。所以在捕获阶段先记下「按下那一刻」是否在组合中。
+let composingAtPress = false
+editor.view.dom.addEventListener('mousedown', (event) => {
+  composingAtPress = editor.view.composing || event.isComposing === true
+}, true)
+
+// 只在正文开始拖动后接管（拖文件进来时不滚，交给系统默认）
+editor.view.dom.addEventListener('dragstart', (event) => {
+  // 输入法组合中按下去拖，会把还没上屏的拼音一起搬走；preventDefault 直接废掉这次拖拽
+  if (printing || composingAtPress || editor.view.composing || event.isComposing === true) {
+    event.preventDefault()
+    return
+  }
+  editor.view.dom.addEventListener('dragover', dragScrollMove)
+  document.addEventListener('dragend', dragScrollEnd)
+  document.addEventListener('drop', dragScrollEnd)
 })
 
 /* ---------------- 选项卡 ---------------- */

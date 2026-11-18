@@ -1,7 +1,7 @@
 // 自定义 TipTap 扩展：缩进、段距、字距、行距、字号、上下标、图片、表格
 // Word 的语义是"段落/字符属性"，官方扩展没有现成的，按需自行实现
 import { Extension, Mark, Node, ResizableNodeView, getRenderedAttributes, mergeAttributes } from '@tiptap/core'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { Image as BaseImage } from '@tiptap/extension-image'
 import { Table as BaseTable, TableView as BaseTableView } from '@tiptap/extension-table'
@@ -463,6 +463,20 @@ export const WordImage = BaseImage.extend({
       })
       syncFrame(node.attrs)
       const dom = nodeView.dom
+      // 容器是 draggable 时，浏览器按「最近的 draggable 祖先」发起原生拖拽，
+      // 按在手柄上也会把整张图拖走。手柄自己的 mousedown 会 preventDefault，
+      // 但拖拽源在浏览器里更早确定，所以按下手柄时先把容器的 draggable 摘掉，
+      // 松开后再交回 ProseMirror（它下次按下时会自己补回来）
+      const isHandle = (target) => !!target?.closest?.('[data-resize-handle]')
+      dom.addEventListener('mousedown', (event) => {
+        if (!isHandle(event.target)) return
+        dom.draggable = false
+        const restore = () => {
+          dom.removeAttribute('draggable')
+          document.removeEventListener('mouseup', restore, true)
+        }
+        document.addEventListener('mouseup', restore, true)
+      }, true)
       const showNodeView = () => {
         dom.style.visibility = ''
         dom.style.pointerEvents = ''
@@ -648,6 +662,7 @@ export const PlainTextInput = Extension.create({
 
 // 查找高亮：只负责把匹配区间画成装饰，查找状态由 app.js 驱动
 export const findHighlightKey = new PluginKey('findHighlight')
+export const selectionImageHighlightKey = new PluginKey('selectionImageHighlight')
 
 export const FindHighlight = Extension.create({
   name: 'findHighlight',
@@ -674,6 +689,32 @@ export const FindHighlight = Extension.create({
       props: {
         decorations (state) {
           return findHighlightKey.getState(state)
+        }
+      }
+    })]
+  }
+})
+
+// 选区里的图片高亮：img 本身不吃 ::selection，跨图片的 TextSelection
+// 只能在这里补一层半透明遮罩，用户才看得出图片也一起被选中（会一起删、一起拖）
+export const SelectionImageHighlight = Extension.create({
+  name: 'selectionImageHighlight',
+
+  addProseMirrorPlugins () {
+    return [new Plugin({
+      key: selectionImageHighlightKey,
+      props: {
+        decorations (state) {
+          const selection = state.selection
+          // NodeSelection 选单张图时沿用原有的选中框，不再叠遮罩
+          if (selection.empty || !(selection instanceof TextSelection)) return null
+          const decorations = []
+          state.doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+            if (node.type.name !== 'image') return
+            decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'in-selection' }))
+            return false
+          })
+          return decorations.length ? DecorationSet.create(state.doc, decorations) : null
         }
       }
     })]
