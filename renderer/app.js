@@ -432,6 +432,18 @@ editor.view.dom.addEventListener('mousedown', (event) => {
   if (composingAtPress) composingPressAt = Date.now()
 }, true)
 
+// 右键也是同一个问题：PM 的 mousedown 里 endComposition 会把还没上屏的拼音就地提交，
+// 等 contextmenu 事件到了再查 composing 已经晚了。所以在 document 捕获阶段（早于
+// view.dom 上的任何监听）就把这次按下截住，PM 根本收不到，组合原样留着。
+let composingRightPressAt = 0
+document.addEventListener('mousedown', (event) => {
+  if (event.button !== 2) return
+  composingRightPressAt = 0
+  if (!(editor.view.composing || event.isComposing === true)) return
+  composingRightPressAt = Date.now()
+  event.stopPropagation()
+}, true)
+
 // 只在正文开始拖动后接管（拖文件进来时不滚，交给系统默认）
 editor.view.dom.addEventListener('dragstart', (event) => {
   // 输入法组合中按下去拖，会把还没上屏的拼音一起搬走；preventDefault 直接废掉这次拖拽
@@ -1484,8 +1496,8 @@ function finishImageEditing () {
   if (inCropMode()) applyCropMode()
   const { pos, original, dirty: beforeDirty } = imageEdit
   flushImagePreview()
-  const node = editor.state.doc.nodeAt(pos)
-  const finalAttrs = node && node.type.name === 'image' ? { ...node.attrs } : null
+  const node = imageNodeAt(pos)
+  const finalAttrs = node ? { ...node.attrs } : null
   const changed = !!finalAttrs && imageAttrsChanged(original, finalAttrs)
   if (finalAttrs) {
     editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...original }).setMeta('addToHistory', false))
@@ -1501,11 +1513,22 @@ function cancelImageEditing () {
   if (!imageEdit) return
   const { pos, original, dirty: beforeDirty } = imageEdit
   // 不进历史地还原；dirty 也恢复成进入前的值
-  editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...original }).setMeta('addToHistory', false))
+  const node = imageNodeAt(pos)
+  if (node) {
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...original }).setMeta('addToHistory', false))
+  }
   dirty = beforeDirty
   updateDocumentState()
   closeImageEditor()
   showStatus('已取消图片编辑')
+}
+
+// 面板开着的时候文档可能被换掉（打开了别的文件），原来记的 pos 就失效了。
+// 一律先确认那个位置真的还是一张图片，再拿它当图片节点用。
+function imageNodeAt (pos) {
+  if (pos == null || pos < 0 || pos > editor.state.doc.content.size) return null
+  const node = editor.state.doc.nodeAt(pos)
+  return node && node.type.name === 'image' ? node : null
 }
 
 // 只比较会影响文档的属性；crop 是对象，要按四个百分比比
@@ -2210,13 +2233,14 @@ document.addEventListener('contextmenu', (event) => {
   // 输入框保留默认菜单：查找框、对话框里的数字输入都要能复制粘贴
   if (isFormTarget(event.target)) return
   event.preventDefault()
-  const spot = contextMenuTarget(event)
-  if (!spot) {
+  // 组合输入中点右键：菜单不弹、选区不动，拼音留在输入法里
+  // 不能只看 editor.view.composing —— PM 的 mousedown 可能已经把组合结束了
+  if (editor.view.composing || Date.now() - composingRightPressAt < 700 || event.isComposing) {
     closeContextMenu(false)
     return
   }
-  if (editor.view.composing) {
-    // 输入法组合中既不弹菜单，也不改选区
+  const spot = contextMenuTarget(event)
+  if (!spot) {
     closeContextMenu(false)
     return
   }
@@ -2835,6 +2859,15 @@ function handleEditorUpdate () {
 }
 
 function setEditorJSON (json) {
+  // 换文档前先把图片编辑收掉：面板记的 pos 是旧文档里的位置，留着就是个野指针
+  // （Ctrl+O 打开另一个文件后面板还在，按 Esc 会在旧位置 setNodeMarkup 直接抛异常）
+  if (imageEdit) closeImageEditorUI()
+  // 查看器的 close 事件是异步派发的，会等到 setContent 之后才跑。那时再去写回旧文档的选区
+  // 就等于把上一个文档的位置塞进新文档，所以这里先把要还原的选区清掉
+  if (imageViewer.open) {
+    viewerRestore = null
+    closeImageViewer()
+  }
   loadingDocument = true
   editor.commands.setContent(json)
   // setContent 不会清空撤销栈，跨文档撤销可能把上一份文档的内容带回/清空当前文档。
