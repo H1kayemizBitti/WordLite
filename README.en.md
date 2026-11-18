@@ -64,14 +64,14 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 | Area | What you can do |
 | --- | --- |
 | Files | Open / save DOCX and TXT (auto-detects UTF-8, UTF-16, GBK), open via double-click / "Open with" / drag-and-drop, recent files, autosave and crash recovery |
-| Editing | Find / replace, case-sensitive search, highlight all matches and jump between them |
+| Editing | Find / replace, case-sensitive search, highlight all matches and jump between them; drag selected text to another spot (Ctrl+drag copies it), drag images within the document flow |
 | Windows | In-app opens stay in the current window (Save / Don't save / Cancel when modified); drops and "Open with" open a separate window |
 | Text | Font, size, color, highlight, bold, italic, underline, strikethrough, super/subscript, letter spacing, format painter |
 | Paragraphs | Headings 1–3, alignment, indent, line height, spacing before/after, bulleted and numbered lists |
 | Tables | Insert, drag column widths, merge / split cells, cell shading, border width and color |
-| Images | Insert, precise resize, left / center / right align, text wrapping, crop, replace, delete |
+| Images | Insert, drag to move, precise resize, left / center / right align, text wrapping (square / top-and-bottom), visual crop, side panel with live preview and one-step undo, full-size viewer, replace, delete |
 | Page | Paper size, orientation, custom margins, page background, page breaks |
-| Output | Print (page range and copies via the system print dialog), print preview, export to PDF |
+| Output | Print (Ctrl+P opens the system print dialog directly, where you set page range, copies and preview), export to PDF |
 
 <details>
 <summary><b>Keyboard shortcuts</b> (also available in the app with <kbd>F1</kbd>, or <kbd>⌘?</kbd> on macOS)</summary>
@@ -79,8 +79,9 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 | Action | Windows | macOS |
 | --- | --- | --- |
 | New / Open / Save / Save as | <kbd>Ctrl+N</kbd> / <kbd>Ctrl+O</kbd> / <kbd>Ctrl+S</kbd> / <kbd>Ctrl+Shift+S</kbd> | <kbd>⌘N</kbd> / <kbd>⌘O</kbd> / <kbd>⌘S</kbd> / <kbd>⇧⌘S</kbd> |
-| Print preview | <kbd>Ctrl+P</kbd> | <kbd>⌘P</kbd> |
+| Print | <kbd>Ctrl+P</kbd> | <kbd>⌘P</kbd> |
 | Find / Replace | <kbd>Ctrl+F</kbd> / <kbd>Ctrl+H</kbd> | <kbd>⌘F</kbd> / <kbd>⌥⌘F</kbd> |
+| Context menu | <kbd>Shift+F10</kbd> or the Menu key | <kbd>⇧F10</kbd> |
 | Bold / Italic / Underline | <kbd>Ctrl+B</kbd> / <kbd>Ctrl+I</kbd> / <kbd>Ctrl+U</kbd> | <kbd>⌘B</kbd> / <kbd>⌘I</kbd> / <kbd>⌘U</kbd> |
 | Strikethrough | <kbd>Ctrl+Shift+X</kbd> | <kbd>⇧⌘X</kbd> |
 | Superscript / Subscript | <kbd>Ctrl+Shift+=</kbd> / <kbd>Ctrl+=</kbd> | <kbd>⇧⌘=</kbd> / <kbd>⌘=</kbd> |
@@ -91,6 +92,8 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 | Bullet / Numbered list | <kbd>Ctrl+Shift+8</kbd> / <kbd>Ctrl+Shift+7</kbd> | <kbd>⇧⌘8</kbd> / <kbd>⇧⌘7</kbd> |
 | Increase / Decrease indent | <kbd>Ctrl+M</kbd> / <kbd>Ctrl+Shift+M</kbd> | <kbd>⌘]</kbd> / <kbd>⌘[</kbd> |
 | Insert page break | <kbd>Ctrl+Enter</kbd> | <kbd>⌘Enter</kbd> |
+| Image editing: finish / cancel / enter crop | <kbd>Enter</kbd> (or <kbd>Ctrl+Enter</kbd>) / <kbd>Esc</kbd> / <kbd>C</kbd> | <kbd>Enter</kbd> (or <kbd>⌘Enter</kbd>) / <kbd>Esc</kbd> / <kbd>C</kbd> |
+| View image full size (with image selected) | <kbd>Space</kbd> | <kbd>Space</kbd> |
 
 On macOS, Ctrl combinations are left to the system (<kbd>Ctrl+A</kbd> / <kbd>Ctrl+E</kbd> / <kbd>Ctrl+K</kbd> still move to line start / end / kill to end of line). Replace uses <kbd>⌥⌘F</kbd> and indent uses <kbd>⌘]</kbd> / <kbd>⌘[</kbd> because <kbd>⌘H</kbd> (Hide) and <kbd>⌘M</kbd> (Minimize) belong to macOS.
 
@@ -186,10 +189,11 @@ docs/                   README screenshot and migration notes
 - Packaged and tested on Windows 10 / 11 and macOS 13 Ventura or later (both Apple silicon and Intel); older macOS versions are untested
 - Choosing Quit from the Dock icon's context menu, logging out or shutting down exits without a save prompt; unsaved work is recovered from autosave when you reopen the app
 - The macOS build is ad-hoc signed and not notarized, so the first launch needs the steps under "Download"; the Windows build is not code-signed either
-- Print preview paginates by content blocks; a single extremely long paragraph without breaks is not split by line in the preview (the PDF / print engine still paginates by line)
 - Text boxes, nested tables and complex fields are simplified on DOCX import
 - DOCX import restores only direct run formatting: `w:color` text colour, `w:highlight` highlighter and run-level `w:shd` character shading. Theme colours use the cached value in `w:color/@w:val` (a theme colour with no cached value is not restored); colours defined in character or paragraph styles and paragraph shading are not restored. When a run cannot be aligned with confidence it is left uncoloured, so colour never lands on the wrong characters
-- Image text wrapping supports left and right only
+- Image text wrapping supports inline, square (left / right) and top-and-bottom; tight, through, behind-text and in-front-of-text wrapping is simplified on import with a warning
+- Dragging text and images, and adjusting the crop box, work with a mouse only; touch long-press dragging and wheel zoom / panning inside the crop box are postponed to v1.2 (touch pens untested)
+- The image viewer is read-only: no previous / next image, no saving the image, and no pinch zoom (a trackpad pinch goes through Ctrl+wheel)
 
 ## FAQ
 
