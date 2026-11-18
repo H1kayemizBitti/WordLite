@@ -1564,6 +1564,9 @@ function closeImageEditor () {
 // Ctrl+Enter 永远 = 完成、Tab 只在面板内循环
 function onImagePanelKeydown (event) {
   if (!imageEdit) return
+  // 有模态框（比如查看大图）开着时键盘归模态框：面板在模态下层是 inert，
+  // 这里再把 Tab 抓到面板上会让焦点彻底不动
+  if (document.querySelector('dialog[open]')) return
   if (event.isComposing || event.keyCode === 229) return
   // 裁剪状态是 Esc 分层里的最上一层：先退出裁剪，面板留着
   if (event.key === 'Escape' && inCropMode()) {
@@ -1873,6 +1876,18 @@ imageViewer.addEventListener('keydown', (event) => {
   if (!viewerState || event.defaultPrevented) return
   if (isMod(event) || event.altKey) return
   const key = event.key
+  // Tab 只在工具条按钮之间循环：modal 底下的面板是 inert，跑到 BODY 上焦点就丢了
+  if (key === 'Tab') {
+    const items = [...imageViewer.querySelectorAll('button, [tabindex="0"]')].filter((el) => !el.disabled)
+    if (!items.length) return
+    event.preventDefault()
+    const index = items.indexOf(document.activeElement)
+    const next = event.shiftKey
+      ? items[(index <= 0 ? items.length : index) - 1]
+      : items[(index + 1) % items.length]
+    next.focus({ preventScroll: true })
+    return
+  }
   if (key === '+' || key === '=' || key === 'Add') {
     event.preventDefault()
     setViewerZoom(viewerState.zoom * VIEWER_STEP)
@@ -1903,10 +1918,13 @@ imageViewer.addEventListener('keydown', (event) => {
   }
 })
 
-// Esc 落在 modal 内部的键盘事件上，<dialog> 自己会关；这里只兜住焦点跑到外面的情况
+// 查看器是从图片编辑面板里打开的，所以 Esc 只能关查看器这一层：
+// 捕获阶段先关掉，并用 stopImmediatePropagation 挡住同一个 document 上后注册的
+// 编辑面板监听（否则它会把「取消图片编辑」也一起做了）
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || !imageViewer.open) return
   event.preventDefault()
+  event.stopImmediatePropagation()
   closeImageViewer()
 }, true)
 
