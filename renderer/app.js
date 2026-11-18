@@ -9,7 +9,8 @@ import { Color } from '@tiptap/extension-color'
 import { FontFamily } from '@tiptap/extension-font-family'
 import { TableRow } from '@tiptap/extension-table-row'
 import { CharacterCount, Placeholder } from '@tiptap/extensions'
-import { EditorState, TextSelection } from '@tiptap/pm/state'
+import { EditorState, NodeSelection, TextSelection } from '@tiptap/pm/state'
+import { redoDepth, undoDepth } from '@tiptap/pm/history'
 import {
   FindHighlight,
   findHighlightKey,
@@ -423,8 +424,12 @@ function dragScrollEnd () {
 // ProseMirror 的 mousedown 第一件事就是 endComposition，等 dragstart 再查
 // view.composing 永远是 false。所以在捕获阶段先记下「按下那一刻」是否在组合中。
 let composingAtPress = false
+// 双击的第一次按下会顺手结束组合，第二次按下时 view.composing 已经是 false，
+// 所以再记一个时间戳，让整组双击都算「组合中按下的」
+let composingPressAt = 0
 editor.view.dom.addEventListener('mousedown', (event) => {
   composingAtPress = editor.view.composing || event.isComposing === true
+  if (composingAtPress) composingPressAt = Date.now()
 }, true)
 
 // 只在正文开始拖动后接管（拖文件进来时不滚，交给系统默认）
@@ -593,7 +598,7 @@ document.querySelector('#ribbon').addEventListener('click', (e) => {
   } else if (cmd === 'insertImage') {
     insertImage()
   } else if (cmd === 'editImage') {
-    openImageDialog()
+    openImageEditor(imagePosFromSelection())
   }
   syncToolbar()
 })
@@ -697,118 +702,550 @@ function applyFormatPainter () {
   showStatus('已应用格式')
 }
 
-/* ---------------- 图片设置 ---------------- */
+/* ---------------- 图片编辑面板 ---------------- */
 
-const imageDialog = document.querySelector('#imageDialog')
-const imageWidthInput = document.querySelector('#imageWidth')
-const imageHeightInput = document.querySelector('#imageHeight')
-const imageLockRatio = document.querySelector('#imageLockRatio')
-let imageRatio = 1
+// 右侧悬浮抽屉：进入编辑时记下原始属性；所有改动实时写进文档（addToHistory:false），
+// 正文重排和 DOCX 导出看到的都是最终效果。完成 / 取消时才决定历史栈怎么走。
+const imagePanel = document.querySelector('#imagePanel')
+const imageDim = document.querySelector('#imageDim')
+const panelWidthInput = document.querySelector('#panelImageWidth')
+const panelHeightInput = document.querySelector('#panelImageHeight')
+const panelLockRatio = document.querySelector('#panelImageLockRatio')
+const panelAlign = document.querySelector('#panelImageAlign')
+const panelWrap = document.querySelector('#panelImageWrap')
+const panelCropInputs = {
+  top: document.querySelector('#panelCropTop'),
+  right: document.querySelector('#panelCropRight'),
+  bottom: document.querySelector('#panelCropBottom'),
+  left: document.querySelector('#panelCropLeft')
+}
 
-function openImageDialog (selectedImage = null) {
-  if (!editor.isActive('image')) {
+let imageEdit = null
+let imagePreviewFrame = 0
+let imagePreviewAttrs = null
+let imagePerfFrames = 0
+
+function imagePosFromSelection () {
+  const selection = editor.state.selection
+  if (selection.node?.type.name === 'image') return selection.from
+  return null
+}
+
+function imageDom (pos) {
+  try {
+    return editor.view.nodeDOM(pos)
+  } catch {
+    return null
+  }
+}
+
+function imageFrameEl (pos) {
+  const dom = imageDom(pos)
+  if (!dom) return null
+  return dom.querySelector?.('[data-resize-container]') || dom.closest?.('[data-resize-container]') || dom
+}
+
+function imageImgEl (pos) {
+  return imageDom(pos)?.querySelector?.('img') || null
+}
+
+// 面板悬浮在右侧、不挤占纸张宽度，所以进入编辑只多做一件事：
+// 给工作区补左右等宽的内边距（多出横向滚动余量），再把 scrollLeft 调回来，
+// 让纸张在屏幕上的位置和进入前完全一致。只有图片确实被面板压住时才继续横滚。
+function revealImageAbovePanel (pos, paperLeftBefore) {
+  const paper = document.querySelector('.paper')
+  if (!paper) return
+  const paperLeft = paper.getBoundingClientRect().left
+  // 补内边距后纸张会往右移，用横向滚动抵消，位置一秒不变
+  if (paperLeftBefore != null) workspaceEl.scrollLeft += paperLeft - paperLeftBefore
+  const frame = imageFrameEl(pos)
+  if (!frame) return
+  const imageBox = frame.getBoundingClientRect()
+  const panelBox = imagePanel.getBoundingClientRect()
+  const workspaceBox = workspaceEl.getBoundingClientRect()
+  const overlap = imageBox.right - (panelBox.left - 16)
+  if (overlap > 0) workspaceEl.scrollLeft += overlap
+  if (imageBox.top < workspaceBox.top + 8) {
+    workspaceEl.scrollTop -= workspaceBox.top + 8 - imageBox.top
+  } else if (imageBox.top > workspaceBox.bottom - 40) {
+    workspaceEl.scrollTop += imageBox.top - workspaceBox.top - 8
+  }
+}
+
+// 变暗层按图片外框切成四块铺满窗口：表格单元格的 overflow 裁不到它，
+// 点在上面也确实落在遮罩本身（行为统一交给 onEditorBackdropClick）
+function syncImageDim () {
+  if (!imageEdit || imagePanel.hidden) return
+  const frame = imageFrameEl(imageEdit.pos)
+  if (!frame) {
+    imageDim.hidden = true
+    return
+  }
+  const box = frame.getBoundingClientRect()
+  const width = window.innerWidth
+  const height = window.innerHeight
+  const left = Math.min(Math.max(0, box.left), width)
+  const right = Math.min(Math.max(left, box.right), width)
+  const top = Math.min(Math.max(0, box.top), height)
+  const bottom = Math.min(Math.max(top, box.bottom), height)
+  const parts = {
+    top: [0, 0, width, top],
+    bottom: [0, bottom, width, Math.max(0, height - bottom)],
+    left: [0, top, left, Math.max(0, bottom - top)],
+    right: [right, top, Math.max(0, width - right), Math.max(0, bottom - top)]
+  }
+  imageDim.hidden = false
+  for (const part of imageDim.querySelectorAll('.image-dim-part')) {
+    const rect = parts[part.dataset.side]
+    part.style.left = `${rect[0]}px`
+    part.style.top = `${rect[1]}px`
+    part.style.width = `${rect[2]}px`
+    part.style.height = `${rect[3]}px`
+  }
+}
+
+// 面板里填的是原图显示尺寸；文档里的 width/height 记的是裁剪后的可见尺寸（V3 起）
+function setPanelFieldValues (attrs) {
+  const img = imageImgEl(imageEdit?.pos ?? -1)
+  const natural = {
+    width: img?.naturalWidth || attrNumber(attrs.width) || 300,
+    height: img?.naturalHeight || attrNumber(attrs.height) || 200
+  }
+  const frame = imageCropFrame(attrs, natural)
+  panelWidthInput.value = Math.round(frame.innerWidth || natural.width)
+  panelHeightInput.value = Math.round(frame.innerHeight || natural.height)
+  const fullWidth = Number.parseFloat(panelWidthInput.value)
+  const fullHeight = Number.parseFloat(panelHeightInput.value)
+  if (imageEdit) imageEdit.ratio = fullWidth > 0 && fullHeight > 0 ? fullWidth / fullHeight : 1
+  panelLockRatio.checked = true
+  const crop = attrs.crop || {}
+  panelAlign.value = attrs.align || 'left'
+  panelWrap.value = attrs.wrap || 'none'
+  for (const side of ['top', 'right', 'bottom', 'left']) {
+    panelCropInputs[side].value = Number(crop[side]) || 0
+  }
+}
+
+function attrNumber (value) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+// 撤销栈深度：selftest 用它验证「取消不动栈、完成只加一步」
+function historyState () {
+  const state = editor.state
+  return { undo: undoDepth(state), redo: redoDepth(state) }
+}
+// 给自测脚本用的小接口（不对外）
+window.__wlImageEditor = {
+  historyState,
+  isEditing: () => !!imageEdit,
+  open: (pos) => openImageEditor(pos),
+  finish: () => finishImageEditing(),
+  cancel: () => cancelImageEditing(),
+  panel: () => imagePanel
+}
+
+// 三种入口（双击 / 选中后 Enter / 右键「图片设置…」）都走这一个函数
+function openImageEditor (pos = null) {
+  const target = pos == null ? imagePosFromSelection() : pos
+  const node = target == null ? null : editor.state.doc.nodeAt(target)
+  if (!node || node.type.name !== 'image') {
     showStatus('请先在文档中单击选中图片')
     return
   }
-  const attrs = editor.getAttributes('image')
-  const selected = selectedImage || editor.view.dom.querySelector('img.ProseMirror-selectednode')
-  const naturalWidth = selected?.naturalWidth || attrs.width || 300
-  const naturalHeight = selected?.naturalHeight || attrs.height || 200
-  const crop = attrs.crop || {}
-  // V3 起 width/height 表示「裁剪后的可见尺寸」。对话框里要填的是原图显示尺寸，
-  // 否则原样点确认会按已裁剪的比例再算一次，图会越裁越小。
-  const frame = imageCropFrame(attrs, { width: naturalWidth, height: naturalHeight })
-  const fullWidth = frame.innerWidth || naturalWidth
-  const fullHeight = frame.innerHeight || naturalHeight
-  imageRatio = fullWidth && fullHeight ? fullWidth / fullHeight : naturalWidth / naturalHeight
-  imageWidthInput.value = Math.round(fullWidth)
-  imageHeightInput.value = Math.round(fullHeight)
-  imageLockRatio.checked = true
-  document.querySelector('#imageAlign').value = attrs.align || 'left'
-  document.querySelector('#imageWrap').value = attrs.wrap || 'none'
-  for (const side of ['top', 'right', 'bottom', 'left']) {
-    document.querySelector(`#crop${side[0].toUpperCase()}${side.slice(1)}`).value = Number(crop[side]) || 0
+  // 已经在编辑另一张图：先把上一张收尾
+  if (imageEdit) finishImageEditing()
+  imageEdit = {
+    pos: target,
+    original: { ...node.attrs },
+    ratio: 1,
+    dirty,
+    degraded: false,
+    pending: null
   }
-  if (!imageDialog.open) imageDialog.showModal()
+  imagePreviewAttrs = null
+  imagePerfFrames = 0
+  const selection = editor.state.selection
+  if (selection.node == null || selection.from !== target) {
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, target)))
+  }
+  setPanelFieldValues(node.attrs)
+  imageFrameEl(target)?.classList.add('image-editing')
+  imagePanel.hidden = false
+  // 记下纸张当前的屏幕位置：补内边距后要把它还原，图片才不会“跳”
+  const paperLeftBefore = document.querySelector('.paper')?.getBoundingClientRect().left ?? null
+  workspaceEl.classList.add('image-edit-mode')
+  imageDim.addEventListener('click', onEditorBackdropClick)
+  imageDim.addEventListener('wheel', onImageDimWheel, { passive: true })
+  document.addEventListener('keydown', onImagePanelKeydown, true)
+  // 编辑期间锁住正文输入：免得输入法、撤销栈和实时预览互相干扰。
+  // 第二个参数 false = 不触发 update，否则进编辑这一下就会把文档标成未保存
+  editor.setEditable(false, false)
+  // 实时预览会一直改文档，自动备份先停，退出时再排
+  clearTimeout(autosaveTimer)
+  requestAnimationFrame(() => {
+    if (!imageEdit) return
+    revealImageAbovePanel(imageEdit.pos, paperLeftBefore)
+    syncImageDim()
+    panelWidthInput.focus({ preventScroll: true })
+  })
+  showStatus(`正在编辑图片：${isMac ? '⌘↵' : 'Ctrl+Enter'} 完成，Esc 取消`, 0)
 }
 
-imageWidthInput.addEventListener('input', () => {
-  if (!imageLockRatio.checked || !imageRatio) return
-  const value = Number.parseFloat(imageWidthInput.value)
-  if (Number.isFinite(value) && value > 0) imageHeightInput.value = Math.round(value / imageRatio)
-})
+function onImageDimWheel (event) {
+  // 遮罩盖在正文上，滚轮要转给工作区
+  workspaceEl.scrollTop += event.deltaY
+  syncImageDim()
+}
 
-imageHeightInput.addEventListener('input', () => {
-  if (!imageLockRatio.checked || !imageRatio) return
-  const value = Number.parseFloat(imageHeightInput.value)
-  if (Number.isFinite(value) && value > 0) imageWidthInput.value = Math.round(value * imageRatio)
-})
+// 实时预览：一帧最多写一次；连续 3 帧超过 50ms 就降级成松手 / 失焦才应用
+function scheduleImagePreview (attrs) {
+  if (!imageEdit) return
+  if (imageEdit.degraded) {
+    imageEdit.pending = attrs
+    return
+  }
+  imagePreviewAttrs = attrs
+  if (imagePreviewFrame) return
+  const started = performance.now()
+  imagePreviewFrame = requestAnimationFrame(() => {
+    imagePreviewFrame = 0
+    const elapsed = performance.now() - started
+    imagePerfFrames = elapsed > 50 ? imagePerfFrames + 1 : 0
+    if (imagePerfFrames >= 3 && imageEdit && !imageEdit.degraded) {
+      imageEdit.degraded = true
+      showStatus('文档较大，已改为松手后应用', 0)
+    }
+    const pending = imagePreviewAttrs
+    imagePreviewAttrs = null
+    if (pending) applyImagePreview(pending)
+  })
+}
 
-document.querySelector('#btnApplyImage').addEventListener('click', () => {
+function applyImagePreview (attrs) {
+  if (!imageEdit) return
+  const pos = imageEdit.pos
+  const node = editor.state.doc.nodeAt(pos)
+  if (!node || node.type.name !== 'image') return
+  // addToHistory:false：预览不进撤销栈，完成时才合成一步
+  editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...node.attrs, ...attrs }).setMeta('addToHistory', false))
+  syncImageDim()
+}
+
+function flushImagePreview () {
+  if (!imageEdit) return
+  // 还没落盘的帧马上补上（降级模式下松手 / 失焦靠这个）
+  if (imagePreviewFrame) {
+    cancelAnimationFrame(imagePreviewFrame)
+    imagePreviewFrame = 0
+    const pending = imagePreviewAttrs
+    imagePreviewAttrs = null
+    if (pending) applyImagePreview(pending)
+  }
+  if (!imageEdit.pending) return
+  const pending = imageEdit.pending
+  imageEdit.pending = null
+  applyImagePreview(pending)
+}
+
+function panelAttributes () {
   const crop = {}
   for (const side of ['top', 'right', 'bottom', 'left']) {
-    const id = `#crop${side[0].toUpperCase()}${side.slice(1)}`
-    crop[side] = clamp(document.querySelector(id).value, 0, 95, 0)
+    crop[side] = clamp(panelCropInputs[side].value, 0, 95, 0)
   }
   if (crop.top + crop.bottom >= 100 || crop.left + crop.right >= 100) {
     showStatus('裁剪比例过大：上下或左右之和必须小于 100%', 0)
-    return
+    return null
   }
-  // 输入框里是「原图显示尺寸」，写进文档的 width/height 必须是裁剪后的可见尺寸，
-  // 和 Word 一致（wp:extent 记可见区域，a:srcRect 记裁掉的比例）。
-  const fullWidth = imageWidthInput.value === '' ? null : clamp(imageWidthInput.value, 8, 5000, 300)
-  const fullHeight = imageHeightInput.value === '' ? null : clamp(imageHeightInput.value, 8, 5000, 200)
+  const fullWidth = panelWidthInput.value === '' ? null : clamp(panelWidthInput.value, 8, 5000, 300)
+  const fullHeight = panelHeightInput.value === '' ? null : clamp(panelHeightInput.value, 8, 5000, 200)
+  // 输入框里是原图尺寸，写进文档的必须是裁剪后的可见尺寸（和 Word 一致）
   const visibleX = 1 - (crop.left + crop.right) / 100
   const visibleY = 1 - (crop.top + crop.bottom) / 100
-  const width = fullWidth === null ? null : Math.max(1, Math.round(fullWidth * visibleX))
-  const height = fullHeight === null ? null : Math.max(1, Math.round(fullHeight * visibleY))
-  editor.chain().focus().updateAttributes('image', {
-    width,
-    height,
-    align: document.querySelector('#imageAlign').value || null,
-    wrap: document.querySelector('#imageWrap').value === 'none' ? null : document.querySelector('#imageWrap').value,
+  return {
+    width: fullWidth === null ? null : Math.max(1, Math.round(fullWidth * visibleX)),
+    height: fullHeight === null ? null : Math.max(1, Math.round(fullHeight * visibleY)),
+    align: panelAlign.value || null,
+    wrap: panelWrap.value === 'none' ? null : panelWrap.value,
     crop
-  }).run()
-  imageDialog.close()
+  }
+}
+
+function updatePanelFromInputs () {
+  const attrs = panelAttributes()
+  if (attrs) scheduleImagePreview(attrs)
+}
+
+function syncPanelSize (source) {
+  if (!panelLockRatio.checked || !imageEdit) return
+  const ratio = imageEdit.ratio
+  if (!(ratio > 0)) return
+  const width = Number.parseFloat(panelWidthInput.value)
+  const height = Number.parseFloat(panelHeightInput.value)
+  if (source === panelWidthInput && Number.isFinite(width) && width > 0) {
+    panelHeightInput.value = Math.round(width / ratio)
+  } else if (source === panelHeightInput && Number.isFinite(height) && height > 0) {
+    panelWidthInput.value = Math.round(height * ratio)
+  }
+}
+
+for (const input of [panelWidthInput, panelHeightInput]) {
+  input.addEventListener('input', () => {
+    if (!imageEdit) return
+    syncPanelSize(input)
+    updatePanelFromInputs()
+  })
+  input.addEventListener('change', flushImagePreview)
+  input.addEventListener('blur', flushImagePreview)
+}
+
+panelLockRatio.addEventListener('change', () => {
+  if (!imageEdit) return
+  if (panelLockRatio.checked) {
+    const width = Number.parseFloat(panelWidthInput.value)
+    const height = Number.parseFloat(panelHeightInput.value)
+    if (width > 0 && height > 0) imageEdit.ratio = width / height
+    syncPanelSize(panelWidthInput)
+  }
 })
 
-document.querySelector('#btnReplaceImage').addEventListener('click', async () => {
+for (const select of [panelAlign, panelWrap]) {
+  select.addEventListener('change', () => {
+    if (!imageEdit) return
+    updatePanelFromInputs()
+    flushImagePreview()
+  })
+}
+
+for (const side of ['top', 'right', 'bottom', 'left']) {
+  panelCropInputs[side].addEventListener('input', () => {
+    if (!imageEdit) return
+    updatePanelFromInputs()
+  })
+  panelCropInputs[side].addEventListener('change', flushImagePreview)
+  panelCropInputs[side].addEventListener('blur', flushImagePreview)
+}
+
+function resetPanelSizeToNatural () {
+  if (!imageEdit) return
+  const img = imageImgEl(imageEdit.pos)
+  // 去掉 width/height → 节点视图按原图自然尺寸显示；裁剪保持不动
+  panelWidthInput.value = img?.naturalWidth || ''
+  panelHeightInput.value = img?.naturalHeight || ''
+  const width = img?.naturalWidth || 0
+  const height = img?.naturalHeight || 0
+  if (width > 0 && height > 0) imageEdit.ratio = width / height
+  scheduleImagePreview({ width: null, height: null })
+  flushImagePreview()
+}
+
+document.querySelector('#btnPanelRestoreSize').addEventListener('click', () => {
+  resetPanelSizeToNatural()
+})
+
+document.querySelector('#btnPanelReplaceImage').addEventListener('click', async () => {
+  if (!imageEdit) return
   const filePath = await fileApi.showOpenDialog([{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp'] }])
   if (!filePath) return
   try {
     const data = await fileApi.readFile(filePath, true)
     const extension = filePath.split('.').pop().toLowerCase()
     const mime = extension === 'jpg' ? 'image/jpeg' : `image/${extension}`
-    editor.chain().focus().updateAttributes('image', {
+    panelWidthInput.value = ''
+    panelHeightInput.value = ''
+    for (const side of ['top', 'right', 'bottom', 'left']) panelCropInputs[side].value = 0
+    scheduleImagePreview({
       src: `data:${mime};base64,${data}`,
       alt: fileNameFromPath(filePath),
       width: null,
       height: null,
       crop: { top: 0, right: 0, bottom: 0, left: 0 }
-    }).run()
-    imageDialog.close()
+    })
+    flushImagePreview()
   } catch (error) {
     showStatus(`更换图片失败：${error.message}`, 0)
   }
 })
 
-document.querySelector('#btnDeleteImage').addEventListener('click', () => {
-  editor.chain().focus().deleteSelection().run()
-  imageDialog.close()
+document.querySelector('#btnPanelResetImage').addEventListener('click', () => {
+  if (!imageEdit) return
+  panelWrap.value = 'none'
+  panelLockRatio.checked = true
+  for (const side of ['top', 'right', 'bottom', 'left']) panelCropInputs[side].value = 0
+  resetPanelSizeToNatural()
+  // 对齐保持不变，只把裁剪、尺寸和环绕退回默认
+  updatePanelFromInputs()
 })
 
-document.querySelector('#btnCancelImage').addEventListener('click', () => imageDialog.close())
-
-document.querySelectorAll('[data-close-dialog]').forEach((button) => {
-  button.addEventListener('click', () => document.querySelector(`#${button.dataset.closeDialog}`)?.close())
+document.querySelector('#btnPanelDeleteImage').addEventListener('click', () => {
+  if (!imageEdit) return
+  const pos = imageEdit.pos
+  // 先把属性还原（不进历史）再删节点：整次编辑只留一步撤销
+  editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...imageEdit.original }).setMeta('addToHistory', false))
+  closeImageEditorUI()
+  editor.chain().focus().setNodeSelection(pos).deleteSelection().run()
+  dirty = true
+  updateDocumentState()
+  showStatus('已删除图片')
 })
 
+document.querySelector('#btnPanelCancelImage').addEventListener('click', () => cancelImageEditing())
+document.querySelector('#btnPanelDoneImage').addEventListener('click', () => finishImageEditing())
+
+// 「点变暗区域」的行为只在这一处决定；调度要等用户确认是「完成」还是别的
+function onEditorBackdropClick () {
+  finishImageEditing()
+}
+
+// 完成：先不进历史地恢复原属性，再用一个进历史的事务写入最终属性 → 一次编辑只占一步撤销
+function finishImageEditing () {
+  if (!imageEdit) return
+  const { pos, original, dirty: beforeDirty } = imageEdit
+  flushImagePreview()
+  const node = editor.state.doc.nodeAt(pos)
+  const finalAttrs = node && node.type.name === 'image' ? { ...node.attrs } : null
+  const changed = !!finalAttrs && imageAttrsChanged(original, finalAttrs)
+  if (finalAttrs) {
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...original }).setMeta('addToHistory', false))
+    if (changed) editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...finalAttrs }))
+  }
+  dirty = beforeDirty || changed
+  updateDocumentState()
+  closeImageEditor()
+  showStatus(changed ? '已保存图片修改' : '图片未改动')
+}
+
+function cancelImageEditing () {
+  if (!imageEdit) return
+  const { pos, original, dirty: beforeDirty } = imageEdit
+  // 不进历史地还原；dirty 也恢复成进入前的值
+  editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, { ...original }).setMeta('addToHistory', false))
+  dirty = beforeDirty
+  updateDocumentState()
+  closeImageEditor()
+  showStatus('已取消图片编辑')
+}
+
+// 只比较会影响文档的属性；crop 是对象，要按四个百分比比
+function imageAttrsChanged (before, after) {
+  if (!before || !after) return true
+  const keys = ['width', 'height', 'align', 'wrap', 'src', 'alt', 'crop']
+  return keys.some((key) => {
+    if (key === 'crop') {
+      const a = ['top', 'right', 'bottom', 'left'].map((side) => Number(before.crop?.[side]) || 0)
+      const b = ['top', 'right', 'bottom', 'left'].map((side) => Number(after.crop?.[side]) || 0)
+      return a.some((value, index) => value !== b[index])
+    }
+    return (before[key] ?? null) !== (after[key] ?? null)
+  })
+}
+
+// 只收界面：属性还原由调用方按自己的语义先做掉
+function closeImageEditorUI () {
+  if (!imageEdit) return
+  // 退出时把横向滚动和补出来的内边距一起收掉，纸张回到进编辑前的位置
+  const paperLeftBefore = document.querySelector('.paper')?.getBoundingClientRect().left ?? null
+  if (imagePreviewFrame) cancelAnimationFrame(imagePreviewFrame)
+  imagePreviewFrame = 0
+  imagePreviewAttrs = null
+  for (const frame of document.querySelectorAll('.ProseMirror [data-resize-container].image-editing')) {
+    frame.classList.remove('image-editing')
+  }
+  imagePanel.hidden = true
+  imageDim.hidden = true
+  workspaceEl.classList.remove('image-edit-mode')
+  if (paperLeftBefore != null) {
+    const paperLeftAfter = document.querySelector('.paper')?.getBoundingClientRect().left
+    if (paperLeftAfter != null) workspaceEl.scrollLeft += paperLeftAfter - paperLeftBefore
+  }
+  imageDim.removeEventListener('click', onEditorBackdropClick)
+  imageDim.removeEventListener('wheel', onImageDimWheel)
+  document.removeEventListener('keydown', onImagePanelKeydown, true)
+  editor.setEditable(true, false)
+  imageEdit = null
+  scheduleAutoSave()
+}
+
+function closeImageEditor () {
+  const pos = imageEdit?.pos ?? null
+  closeImageEditorUI()
+  const node = pos == null ? null : editor.state.doc.nodeAt(pos)
+  if (node && node.type.name === 'image') {
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)))
+  }
+  editor.view.focus()
+}
+
+// 面板里的键盘：Esc = 取消、输入框里 Enter 只确认字段、其他位置 Enter = 完成、
+// Ctrl+Enter 永远 = 完成、Tab 只在面板内循环
+function onImagePanelKeydown (event) {
+  if (!imageEdit) return
+  if (event.isComposing || event.keyCode === 229) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    cancelImageEditing()
+    return
+  }
+  if (event.key === 'Enter' && isMod(event)) {
+    event.preventDefault()
+    event.stopPropagation()
+    finishImageEditing()
+    return
+  }
+  if (event.key === 'Enter') {
+    if (isFormTarget(event.target)) return
+    event.preventDefault()
+    event.stopPropagation()
+    finishImageEditing()
+    return
+  }
+  if (event.key === 'Tab') {
+    const items = [...imagePanel.querySelectorAll('button, input, select')].filter((el) => !el.disabled)
+    if (!items.length) return
+    event.preventDefault()
+    const index = items.indexOf(document.activeElement)
+    const next = event.shiftKey
+      ? items[(index <= 0 ? items.length : index) - 1]
+      : items[(index + 1) % items.length]
+    next.focus({ preventScroll: true })
+  }
+}
+
+workspaceEl.addEventListener('scroll', () => {
+  if (imageEdit) syncImageDim()
+}, { passive: true })
+window.addEventListener('resize', () => {
+  if (imageEdit) syncImageDim()
+})
+
+// 选中图片后按 Enter 也进编辑（和双击、右键菜单同一个入口）
+document.addEventListener('keydown', (event) => {
+  if (imageEdit || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+  if (event.key !== 'Enter' || isMod(event) || event.altKey || event.shiftKey) return
+  if (isFormTarget(event.target)) return
+  if (editor.state.selection.node?.type.name !== 'image') return
+  event.preventDefault()
+  event.stopPropagation()
+  openImageEditor()
+}, true)
+
+// 双击图片进入编辑；输入法组合中不进入
 editor.view.dom.addEventListener('dblclick', (event) => {
+  // 组合态在 mousedown 那一刻就记下了：PM 的 mousedown 会先 endComposition。
+  // 第二次按下时组合已经结束，所以要沿用第一下留下的时间戳
+  const composingRecently = Date.now() - composingPressAt < 700
+  if (imageEdit || composingAtPress || composingRecently || editor.view.composing || event.isComposing) return
   const image = event.target.closest('img')
   if (!image) return
   const pos = editor.view.posAtDOM(image, 0)
   editor.chain().focus().setNodeSelection(pos).run()
-  openImageDialog(image)
+  openImageEditor(pos)
+})
+
+document.querySelectorAll('[data-close-dialog]').forEach((button) => {
+  button.addEventListener('click', () => document.querySelector(`#${button.dataset.closeDialog}`)?.close())
 })
 
 /* ---------------- 右键菜单 ---------------- */
@@ -864,17 +1301,17 @@ function contextMenuItemsFor (kind, state) {
         label: '图片设置…',
         shortcut: 'Enter',
         enabled: true,
-        run: () => openImageDialog()
+        run: () => openImageEditor(imagePosFromSelection())
       },
       {
         label: '裁剪',
         enabled: true,
-        // V5 之前先从裁剪输入框开始：打开对话框后把焦点放到「上」
+        // 面板里「裁剪」区在最下面一组之前，打开后直接落到「上」百分比
         run: () => {
-          openImageDialog()
-          const cropTop = document.querySelector('#cropTop')
-          cropTop.focus()
-          cropTop.select()
+          openImageEditor(imagePosFromSelection())
+          const cropTop = document.querySelector('#panelCropTop')
+          cropTop?.focus()
+          cropTop?.select()
         }
       },
       { label: '复制', shortcut: `${modifierLabel}+C`, enabled: true,
@@ -1296,6 +1733,8 @@ document.addEventListener('keydown', (event) => {
 // 在捕获阶段先截住，避免编辑器快捷键抢先处理。
 document.addEventListener('keydown', (e) => {
   if (!isMod(e) || e.altKey || e.isComposing || e.defaultPrevented || isFormTarget(e.target)) return
+  // 图片编辑期间 Ctrl+Enter 是「完成」，分页符让给面板（面板自己也会拦一次，这里兜底）
+  if (e.code === 'Enter' && imageEdit) return
   if (!e.shiftKey && e.key.toLowerCase() === 'e') {
     e.preventDefault()
     e.stopPropagation()
@@ -1318,6 +1757,13 @@ function changeFontSize (delta) {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
     // 有模态对话框时交给对话框自己处理，Esc 只关最上层
+    // 图片面板是 Esc 分层的最上面一层（V5b 会再插一层「裁剪」），比菜单和查找栏都早，
+    // 而且只退一层，不能顺手把查找栏一起关掉
+    if (imageEdit && !document.querySelector('dialog[open]')) {
+      e.preventDefault()
+      cancelImageEditing()
+      return
+    }
     if (!document.querySelector('dialog[open]')) {
       // 右键菜单比查找栏更靠上：先关菜单，查找栏留到下一次 Esc
       if (isContextMenuOpen()) {
@@ -2051,6 +2497,8 @@ async function saveDocument (saveAs = false) {
 }
 
 async function autoSave () {
+  // 图片面板开着时文档正被实时预览反复改写，这一份备份等退出编辑再排
+  if (imageEdit) return
   if (!dirty || saveInProgress) return
   const payload = {
     version: 1,

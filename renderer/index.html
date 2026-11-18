@@ -152,7 +152,7 @@
         <div class="group-title">图片</div>
         <div class="group-body">
           <div class="row">
-            <button class="tbtn ic" data-cmd="editImage" data-image-control title="打开图片设置：大小、对齐、环绕、裁剪、更换和删除"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5V12h10.5M1.5 4H12v10.5"/></svg>图片设置</button>
+            <button class="tbtn ic" data-cmd="editImage" data-image-control title="打开图片编辑面板：大小、对齐、环绕、裁剪、更换和删除"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5V12h10.5M1.5 4H12v10.5"/></svg>图片设置</button>
           </div>
         </div>
       </div>
@@ -325,53 +325,81 @@
   <div class="context-menu-list"></div>
 </div>
 
-<!-- 图片设置 -->
-<dialog class="dialog" id="imageDialog">
-  <div class="dialog-head">
-    <h2>图片设置</h2>
-    <button class="dialog-close" type="button" data-close-dialog="imageDialog" aria-label="关闭">×</button>
+<!-- 图片编辑：右侧悬浮抽屉（不挤占纸张宽度、不改变排版）+ 图片周围的变暗层 -->
+<div class="image-dim" id="imageDim" hidden aria-hidden="true">
+  <div class="image-dim-part" data-side="top"></div>
+  <div class="image-dim-part" data-side="bottom"></div>
+  <div class="image-dim-part" data-side="left"></div>
+  <div class="image-dim-part" data-side="right"></div>
+</div>
+<aside class="image-panel" id="imagePanel" role="dialog" aria-modal="false" aria-label="图片编辑" hidden>
+  <div class="image-panel-head">
+    <h2>图片编辑</h2>
   </div>
-  <div class="dialog-body">
-    <div class="form-grid">
-      <label for="imageWidth">宽度（像素）</label>
-      <input id="imageWidth" class="text-input" type="number" min="8" max="5000" step="1">
-      <label for="imageHeight">高度（像素）</label>
-      <div class="inline-field">
-        <input id="imageHeight" class="text-input" type="number" min="8" max="5000" step="1">
-        <label class="check-label"><input id="imageLockRatio" type="checkbox" checked> 锁定比例</label>
+  <div class="image-panel-body">
+    <section class="image-section">
+      <div class="field-title">大小</div>
+      <div class="panel-row">
+        <label for="panelImageWidth">宽</label>
+        <input id="panelImageWidth" class="num-input" type="number" min="8" max="5000" step="1" aria-label="宽度（像素）">
+        <span class="panel-unit">px</span>
+        <label for="panelImageHeight">高</label>
+        <input id="panelImageHeight" class="num-input" type="number" min="8" max="5000" step="1" aria-label="高度（像素）">
+        <span class="panel-unit">px</span>
       </div>
-      <label for="imageAlign">对齐</label>
-      <select id="imageAlign" class="select wide-select">
-        <option value="left">左对齐</option>
-        <option value="center">居中</option>
-        <option value="right">右对齐</option>
-      </select>
-      <label for="imageWrap">文字环绕</label>
-      <select id="imageWrap" class="select wide-select">
-        <option value="none">嵌入型（不环绕）</option>
-        <option value="left">四周环绕：图片在左</option>
-        <option value="right">四周环绕：图片在右</option>
-        <option value="topBottom">上下型（整行，正文在图上下）</option>
-      </select>
-    </div>
-    <div class="field-group">
-      <div class="field-title">裁剪（百分比，0 表示不裁剪）</div>
-      <div class="crop-grid">
-        <label for="cropTop">上 <input id="cropTop" class="num-input" type="number" min="0" max="95" step="1"></label>
-        <label for="cropRight">右 <input id="cropRight" class="num-input" type="number" min="0" max="95" step="1"></label>
-        <label for="cropBottom">下 <input id="cropBottom" class="num-input" type="number" min="0" max="95" step="1"></label>
-        <label for="cropLeft">左 <input id="cropLeft" class="num-input" type="number" min="0" max="95" step="1"></label>
+      <div class="panel-row">
+        <label class="check-label"><input id="panelImageLockRatio" type="checkbox" checked aria-label="锁定宽高比例"> 锁定比例</label>
+        <button class="tbtn" id="btnPanelRestoreSize" type="button" aria-label="恢复原始大小">恢复原始大小</button>
       </div>
-    </div>
+    </section>
+    <section class="image-section">
+      <div class="field-title">布局</div>
+      <div class="panel-row">
+        <label for="panelImageAlign">对齐</label>
+        <select id="panelImageAlign" class="select" aria-label="图片对齐">
+          <option value="left">左对齐</option>
+          <option value="center">居中</option>
+          <option value="right">右对齐</option>
+        </select>
+      </div>
+      <div class="panel-row">
+        <label for="panelImageWrap">环绕</label>
+        <select id="panelImageWrap" class="select" aria-label="文字环绕">
+          <option value="none">嵌入型</option>
+          <option value="left">四周型：图片在左</option>
+          <option value="right">四周型：图片在右</option>
+          <option value="topBottom">上下型</option>
+        </select>
+      </div>
+    </section>
+    <section class="image-section">
+      <div class="field-title">裁剪</div>
+      <div class="panel-row panel-crop-row">
+        <label for="panelCropTop">上</label>
+        <input id="panelCropTop" class="num-input" type="number" min="0" max="95" step="1" aria-label="上边裁剪百分比"><span class="panel-unit">%</span>
+        <label for="panelCropRight">右</label>
+        <input id="panelCropRight" class="num-input" type="number" min="0" max="95" step="1" aria-label="右边裁剪百分比"><span class="panel-unit">%</span>
+      </div>
+      <div class="panel-row panel-crop-row">
+        <label for="panelCropBottom">下</label>
+        <input id="panelCropBottom" class="num-input" type="number" min="0" max="95" step="1" aria-label="下边裁剪百分比"><span class="panel-unit">%</span>
+        <label for="panelCropLeft">左</label>
+        <input id="panelCropLeft" class="num-input" type="number" min="0" max="95" step="1" aria-label="左边裁剪百分比"><span class="panel-unit">%</span>
+      </div>
+    </section>
+    <section class="image-section">
+      <div class="panel-row">
+        <button class="tbtn" id="btnPanelReplaceImage" type="button" aria-label="替换图片">替换图片…</button>
+        <button class="tbtn" id="btnPanelResetImage" type="button" aria-label="重置：恢复原始大小、取消裁剪、改回嵌入型">重置</button>
+      </div>
+      <button class="tbtn danger panel-wide" id="btnPanelDeleteImage" type="button" aria-label="删除图片">删除图片</button>
+    </section>
   </div>
-  <div class="dialog-foot">
-    <button class="tbtn danger" id="btnDeleteImage" type="button">删除图片</button>
-    <button class="tbtn" id="btnReplaceImage" type="button">更换图片</button>
-    <span class="spacer"></span>
-    <button class="tbtn" id="btnCancelImage" type="button">取消</button>
-    <button class="tbtn primary" id="btnApplyImage" type="button">应用</button>
+  <div class="image-panel-foot">
+    <button class="tbtn" id="btnPanelCancelImage" type="button" aria-label="取消（Esc）">取消</button>
+    <button class="tbtn primary" id="btnPanelDoneImage" type="button" aria-label="完成（Ctrl+Enter）">完成</button>
   </div>
-</dialog>
+</aside>
 
 <!-- 设置 -->
 <dialog class="dialog" id="settingsDialog">
@@ -478,7 +506,7 @@
         <span>增减缩进 / 减少缩进</span><kbd>Ctrl+M / Ctrl+Shift+M</kbd>
         <span>插入分页符</span><kbd>Ctrl+Enter</kbd>
       </div>
-      <p class="dialog-note">图片：选中后双击可打开“图片设置”，支持精确宽高、对齐、文字环绕、裁剪和更换。表格：拖动列边线调整列宽，选中多个单元格后可合并，插入标签页可设置边框和底色。</p>
+      <p class="dialog-note">图片：选中后双击（或按 Enter）打开右侧编辑面板，支持精确宽高、对齐、文字环绕、裁剪和更换；Ctrl+Enter 完成，Esc 取消，一次编辑只占一步撤销。表格：拖动列边线调整列宽，选中多个单元格后可合并，插入标签页可设置边框和底色。</p>
     </section>
 
     <section class="help-panel" id="help-panel-usage" hidden>
@@ -492,7 +520,7 @@
       <h3>编辑与排版</h3>
       <ul class="help-list">
         <li>功能区分为「开始 / 插入 / 布局 / 文件 / 更多」，常用操作都在「开始」。</li>
-        <li>双击图片打开图片设置；表格可拖动列边线、合并单元格、设置边框和底色。</li>
+        <li>双击图片（或选中后按 Enter）打开右侧编辑面板；改宽度、环绕时正文实时重排，按 Ctrl+Enter 完成、Esc 取消。</li>
         <li>Ctrl+F 查找、Ctrl+H 替换；F1 随时打开帮助。</li>
       </ul>
 
@@ -512,7 +540,7 @@
       <h3>已知限制</h3>
       <ul class="help-list">
         <li>DOCX 中的文本框、嵌套表格、复杂域会被简化。</li>
-        <li>图片文字环绕支持左右两种。</li>
+        <li>图片文字环绕支持嵌入型、四周型（左 / 右）和上下型。</li>
         <li>打印分页以分页符为准，长段落自动换页位置可能与屏幕略有差异。</li>
       </ul>
     </section>

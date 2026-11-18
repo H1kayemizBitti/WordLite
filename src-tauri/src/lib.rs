@@ -1650,6 +1650,73 @@ pub fn run() {
                                 results.imageSelected && results.imageMenuHasSettings &&
                                 results.keyboardMenuOpen && results.escClosedMenu &&
                                 results.refreshBlocked && results.refreshNoReload);
+                            // V5：图片编辑面板的撤销栈语义——取消不动栈，完成只加一步
+                            try {{
+                                const edImg = editorEl.editor;
+                                const hook = window.__wlImageEditor;
+                                edImg.chain().focus().setContent(
+                                    '<p>图片编辑检查</p><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width="120" height="80">'
+                                ).run();
+                                await new Promise((resolve) => setTimeout(resolve, 300));
+                                // 位置必须用 posAtDOM 算：doc.forEach 的偏移量对节点位置不可靠（V4 踩过）
+                                const imgEl = editorEl.querySelector('img');
+                                const imagePos = imgEl ? edImg.view.posAtDOM(imgEl, 0) : null;
+                                results.imageEditHook = !!hook;
+                                if (hook && imagePos != null) {{
+                                    // 取消：改动若干项后 Esc，撤销栈深度必须不变
+                                    const before = hook.historyState();
+                                    hook.open(imagePos);
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    results.imagePanelOpen = !hook.panel().hidden;
+                                    const setValue = (selector, value) => {{
+                                        const el = document.querySelector(selector);
+                                        el.value = value;
+                                        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                    }};
+                                    setValue('#panelImageWidth', 200);
+                                    setValue('#panelCropTop', 20);
+                                    document.querySelector('#panelImageWrap').value = 'right';
+                                    document.querySelector('#panelImageWrap').dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    hook.cancel();
+                                    await new Promise((r) => setTimeout(r, 200));
+                                    const afterCancel = hook.historyState();
+                                    const attrsAfterCancel = edImg.getJSON().content.find((n) => n.type === 'image').attrs;
+                                    results.imageEditCancelDepth = before.undo;
+                                    results.imageEditCancelDepthAfter = afterCancel.undo;
+                                    results.imageEditCancelKeptDepth = before.undo === afterCancel.undo;
+                                    results.imageEditCancelRestored = attrsAfterCancel.width === 120 &&
+                                        attrsAfterCancel.height === 80 && (attrsAfterCancel.wrap || null) === null &&
+                                        Number(attrsAfterCancel.crop?.top || 0) === 0;
+                                    results.imagePanelClosedAfterCancel = hook.panel().hidden;
+                                    // 完成：同样改几项后完成，撤销栈应正好 +1
+                                    const beforeDone = hook.historyState();
+                                    hook.open(imagePos);
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    setValue('#panelImageWidth', 200);
+                                    document.querySelector('#panelImageWrap').value = 'right';
+                                    document.querySelector('#panelImageWrap').dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    hook.finish();
+                                    await new Promise((r) => setTimeout(r, 200));
+                                    const afterDone = hook.historyState();
+                                    results.imageEditDoneDepth = beforeDone.undo + 1;
+                                    results.imageEditDoneDepthAfter = afterDone.undo;
+                                    results.imageEditDoneOneStep = afterDone.undo === beforeDone.undo + 1;
+                                    const doneAttrs = edImg.getJSON().content.find((n) => n.type === 'image').attrs;
+                                    results.imageEditDoneApplied = !!doneAttrs && doneAttrs.width === 200 && doneAttrs.wrap === 'right';
+                                    edImg.commands.undo();
+                                    await new Promise((r) => setTimeout(r, 200));
+                                    const undoneAttrs = edImg.getJSON().content.find((n) => n.type === 'image').attrs;
+                                    results.imageEditUndoRestored = !!undoneAttrs && undoneAttrs.width === 120 && (undoneAttrs.wrap || null) === null;
+                                    results.imageEditOk = results.imageEditCancelKeptDepth &&
+                                        results.imageEditCancelRestored && results.imageEditDoneOneStep &&
+                                        results.imageEditDoneApplied && results.imageEditUndoRestored;
+                                }}
+                            }} catch (imageEditError) {{
+                                results.imageEditOk = false;
+                                results.imageEditError = String(imageEditError);
+                            }}
                             results.state = 'ok';
                         }} catch (error) {{
                             results.error = String(error);
