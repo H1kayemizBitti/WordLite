@@ -418,6 +418,9 @@
     </section>
     <section class="image-section">
       <div class="panel-row">
+        <button class="tbtn" id="btnPanelViewImage" type="button" aria-label="查看大图（空格）">查看大图</button>
+      </div>
+      <div class="panel-row">
         <button class="tbtn" id="btnPanelReplaceImage" type="button" aria-label="替换图片">替换图片…</button>
         <button class="tbtn" id="btnPanelResetImage" type="button" aria-label="重置：恢复原始大小、取消裁剪、改回嵌入型">重置</button>
       </div>
@@ -429,6 +432,22 @@
     <button class="tbtn primary" id="btnPanelDoneImage" type="button" aria-label="完成（Ctrl+Enter）">完成</button>
   </div>
 </aside>
+
+<!-- 图片查看器：只改视图，不动文档。用 <dialog> 是为了让 Esc 分层和「有模态框时 Ctrl+P 忽略」自动生效 -->
+<dialog class="image-viewer" id="imageViewer" aria-label="图片查看器">
+  <div class="viewer-stage" id="viewerStage">
+    <img class="viewer-image" id="viewerImage" alt="" draggable="false">
+  </div>
+  <div class="viewer-bar">
+    <button class="tbtn" id="btnViewerZoomOut" type="button" aria-label="缩小（-）">－</button>
+    <span class="viewer-percent" id="viewerPercent">100%</span>
+    <button class="tbtn" id="btnViewerZoomIn" type="button" aria-label="放大（+）">＋</button>
+    <button class="tbtn" id="btnViewerFit" type="button" aria-label="适合窗口（0）">适合窗口</button>
+    <button class="tbtn" id="btnViewerActual" type="button" aria-label="原始大小（1）">100%</button>
+    <span class="viewer-hint">滚轮缩放 · 拖动平移 · 双击切换</span>
+    <button class="tbtn primary" id="btnViewerClose" type="button" aria-label="关闭（Esc）">关闭</button>
+  </div>
+</dialog>
 
 <!-- 设置 -->
 <dialog class="dialog" id="settingsDialog">

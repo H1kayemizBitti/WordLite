@@ -1789,6 +1789,55 @@ pub fn run() {
                                 results.cropOk = false;
                                 results.cropError = String(cropError);
                             }}
+                            // V6：图片查看器——打开关闭不动文档、不动撤销栈、缩放上下限、姿势还原
+                            try {{
+                                const edView = editorEl.editor;
+                                const viewer = window.__wlImageViewer;
+                                edView.chain().focus().setContent(
+                                    '<p>查看大图检查</p><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width="200" height="150">'
+                                ).run();
+                                await new Promise((resolve) => setTimeout(resolve, 300));
+                                const viewImg = editorEl.querySelector('img');
+                                const viewPos = viewImg ? edView.view.posAtDOM(viewImg, 0) : null;
+                                results.viewerHook = !!(viewer && viewPos != null && viewer.open);
+                                if (viewer && viewPos != null && viewer.open) {{
+                                    const beforeDoc = edView.state.doc.toJSON();
+                                    const beforeDepth = window.__wlImageEditor.historyState();
+                                    const beforeSelection = edView.state.selection.from;
+                                    const beforeDirtyBytes = JSON.stringify(beforeDoc).length;
+                                    viewer.open(viewPos);
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    results.viewerOpened = viewer.isOpen();
+                                    results.viewerShowsOriginal = viewer.image().src === edView.state.doc.nodeAt(viewPos).attrs.src;
+                                    const fit = viewer.fitScale();
+                                    results.viewerFitCapped = fit > 0 && fit <= 1;
+                                    viewer.zoom(9);
+                                    results.viewerZoomClampedHigh = Math.abs(viewer.state().zoom - 8) < 1e-6;
+                                    viewer.zoom(0.001);
+                                    results.viewerZoomClampedLow = Math.abs(viewer.state().zoom - 0.1) < 1e-6;
+                                    viewer.pan(30, -20);
+                                    const panned = viewer.state();
+                                    results.viewerPanApplied = Math.abs(panned.x - 30) < 1e-6 && Math.abs(panned.y + 20) < 1e-6;
+                                    viewer.close();
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    results.viewerClosed = !viewer.isOpen();
+                                    const afterDoc = edView.state.doc.toJSON();
+                                    const afterDepth = window.__wlImageEditor.historyState();
+                                    results.viewerNoDocChange = JSON.stringify(afterDoc) === JSON.stringify(beforeDoc);
+                                    results.viewerNoHistoryChange =
+                                        afterDepth.undo === beforeDepth.undo && afterDepth.redo === beforeDepth.redo;
+                                    results.viewerSelectionKept = edView.state.selection.from === beforeSelection;
+                                    results.viewerNoDirty = beforeDirtyBytes === JSON.stringify(afterDoc).length;
+                                    results.viewerOk = results.viewerOpened && results.viewerShowsOriginal &&
+                                        results.viewerFitCapped && results.viewerZoomClampedHigh &&
+                                        results.viewerZoomClampedLow && results.viewerPanApplied &&
+                                        results.viewerClosed && results.viewerNoDocChange &&
+                                        results.viewerNoHistoryChange && results.viewerSelectionKept;
+                                }}
+                            }} catch (viewerError) {{
+                                results.viewerOk = false;
+                                results.viewerError = String(viewerError);
+                            }}
                             results.state = 'ok';
                         }} catch (error) {{
                             results.error = String(error);

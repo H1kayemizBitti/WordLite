@@ -962,8 +962,74 @@ body.file-drag-over::after {
 .ProseMirror [data-resize-container].image-cropping [data-resize-handle] { display: none !important; }
 .ProseMirror [data-resize-container].image-cropping img { cursor: default; }
 
+/* ---------- 图片查看器（V6） ---------- */
+
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border: none;
+  padding: 0;
+  background: rgba(12, 16, 24, 0.9);
+  color: #f5f7fa;
+  display: none;
+  overflow: hidden;
+  user-select: none;
+}
+.image-viewer[open] { display: flex; flex-direction: column; }
+.image-viewer::backdrop { background: rgba(12, 16, 24, 0.55); }
+.viewer-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+.viewer-stage.grabbing { cursor: grabbing; }
+.viewer-image {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-origin: center center;
+  max-width: none;
+  max-height: none;
+  will-change: transform;
+  pointer-events: none;
+  user-select: none;
+  image-rendering: auto;
+  /* 平移基准：图片中心对齐舞台中心 */
+  margin: 0;
+  translate: -50% -50%;
+}
+.viewer-bar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(20, 26, 36, 0.92);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.viewer-bar .tbtn {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #f5f7fa;
+  padding: 4px 12px;
+  min-height: 28px;
+}
+.viewer-bar .tbtn:hover { background: rgba(255, 255, 255, 0.18); }
+.viewer-bar .tbtn.primary { background: var(--accent); border-color: var(--accent); }
+.viewer-percent { min-width: 56px; text-align: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.viewer-hint { margin-left: auto; font-size: 11.5px; color: rgba(255, 255, 255, 0.55); }
+
 @media print {
-  .image-dim, .image-panel, .crop-overlay { display: none !important; }
+  .image-dim, .image-panel, .crop-overlay, .image-viewer { display: none !important; }
   #workspace.image-edit-mode { padding: 0 !important; }
   .ProseMirror [data-resize-container].image-editing [data-resize-wrapper] { outline: none !important; }
 }

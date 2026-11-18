@@ -1654,6 +1654,19 @@ document.addEventListener('keydown', (event) => {
   openImageEditor()
 }, true)
 
+// 选中图片后按空格查看大图（和资源管理器习惯一致）。空格在正文里只用来输入空格，
+// 所以要和「选区是整张图片」严格绑定；输入框、组合态、对话框里都不拦
+document.addEventListener('keydown', (event) => {
+  if (imageEdit || imageViewer.open || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+  if (event.key !== ' ' && event.key !== 'Spacebar') return
+  if (isMod(event) || event.altKey || event.shiftKey) return
+  if (isFormTarget(event.target) || document.querySelector('dialog[open]')) return
+  if (editor.state.selection.node?.type.name !== 'image') return
+  event.preventDefault()
+  event.stopPropagation()
+  openImageViewer()
+}, true)
+
 // 双击图片进入编辑；输入法组合中不进入
 editor.view.dom.addEventListener('dblclick', (event) => {
   // 组合态在 mousedown 那一刻就记下了：PM 的 mousedown 会先 endComposition。
@@ -1670,6 +1683,252 @@ editor.view.dom.addEventListener('dblclick', (event) => {
 document.querySelectorAll('[data-close-dialog]').forEach((button) => {
   button.addEventListener('click', () => document.querySelector(`#${button.dataset.closeDialog}`)?.close())
 })
+
+/* ---------------- 图片查看器（V6） ---------------- */
+
+// 只看不改：缩放和平移全部落在 CSS transform 上，不发 ProseMirror 事务，
+// 所以 dirty、撤销栈、选区都和打开前一样。显示的是节点里的 src（完整原图，不带裁剪）。
+const imageViewer = document.querySelector('#imageViewer')
+const viewerStage = document.querySelector('#viewerStage')
+const viewerImage = document.querySelector('#viewerImage')
+const viewerPercent = document.querySelector('#viewerPercent')
+const VIEWER_MIN = 0.1
+const VIEWER_MAX = 8
+const VIEWER_STEP = 1.2
+
+let viewerState = null
+let viewerDrag = null
+let viewerRestore = null
+
+function viewerNaturalSize () {
+  return {
+    width: viewerImage.naturalWidth || 1,
+    height: viewerImage.naturalHeight || 1
+  }
+}
+
+// 适合窗口：按舞台可用区域（去掉工具条）取能放下的比例，且不超过 100%
+function viewerFitScale () {
+  const { width, height } = viewerNaturalSize()
+  const stage = viewerStage.getBoundingClientRect()
+  return Math.min(1, stage.width / width, stage.height / height)
+}
+
+function applyViewerTransform () {
+  if (!viewerState) return
+  const { zoom, x, y } = viewerState
+  viewerImage.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`
+  viewerPercent.textContent = `${Math.round(zoom * 100)}%`
+}
+
+// 缩放：默认为舞台中心，滚轮缩放时按指针位置锚定（放大前后指针下的像素不动）
+function setViewerZoom (next, anchor = null) {
+  if (!viewerState) return
+  const zoom = clamp(next, VIEWER_MIN, VIEWER_MAX, viewerState.zoom)
+  if (zoom === viewerState.zoom) return
+  const stage = viewerStage.getBoundingClientRect()
+  const ax = anchor ? anchor.x - stage.left : stage.width / 2
+  const ay = anchor ? anchor.y - stage.top : stage.height / 2
+  const centerX = stage.width / 2
+  const centerY = stage.height / 2
+  const ratio = zoom / viewerState.zoom
+  viewerState.x = ax - centerX - (ax - centerX - viewerState.x) * ratio
+  viewerState.y = ay - centerY - (ay - centerY - viewerState.y) * ratio
+  viewerState.zoom = zoom
+  applyViewerTransform()
+}
+
+function fitViewer () {
+  if (!viewerState) return
+  viewerState.zoom = viewerFitScale()
+  viewerState.x = 0
+  viewerState.y = 0
+  applyViewerTransform()
+}
+
+function actualSizeViewer () {
+  setViewerZoom(1)
+  if (!viewerState) return
+  viewerState.x = 0
+  viewerState.y = 0
+  applyViewerTransform()
+}
+
+function panViewer (dx, dy) {
+  if (!viewerState) return
+  viewerState.x += dx
+  viewerState.y += dy
+  applyViewerTransform()
+}
+
+function openImageViewer (pos = null) {
+  const selection = editor.state.selection
+  const target = pos == null ? (selection.node?.type.name === 'image' ? selection.from : null) : pos
+  const node = target == null ? null : editor.state.doc.nodeAt(target)
+  if (!node || node.type.name !== 'image' || !node.attrs.src) {
+    showStatus('请先在文档中单击选中图片')
+    return
+  }
+  // 记下打开前的焦点和选区，关闭时原样还回去
+  viewerRestore = {
+    selection: editor.state.selection,
+    editableFocus: editor.view.hasFocus(),
+    activeElement: document.activeElement
+  }
+  viewerImage.src = node.attrs.src
+  // 先 showModal 再量舞台：display:none 时 getBoundingClientRect 全是 0
+  if (!imageViewer.open) imageViewer.showModal()
+  const show = () => {
+    if (!viewerState) return
+    viewerState.zoom = viewerFitScale()
+    viewerState.x = 0
+    viewerState.y = 0
+    applyViewerTransform()
+  }
+  viewerState = { zoom: 1, x: 0, y: 0, source: node.attrs.src }
+  if (viewerImage.complete && viewerImage.naturalWidth) show()
+  else viewerImage.addEventListener('load', show, { once: true })
+  document.querySelector('#btnViewerZoomIn').focus({ preventScroll: true })
+}
+
+function closeImageViewer () {
+  if (!imageViewer.open) return
+  imageViewer.close()
+}
+
+// close 事件统一收尾：恢复焦点和选区，把状态清干净（打开失败也不会留下残余）
+imageViewer.addEventListener('close', () => {
+  const restore = viewerRestore
+  viewerRestore = null
+  viewerState = null
+  viewerDrag = null
+  viewerImage.removeAttribute('src')
+  viewerImage.style.transform = ''
+  viewerImage.style.cursor = 'grab'
+  viewerStage.classList.remove('grabbing')
+  // 回到正文：图片保持选中（打开前的选区原样写回，不进历史）
+  if (restore && editor.isEditable) {
+    const selection = editor.state.selection
+    if (!selection.eq(restore.selection)) {
+      editor.view.dispatch(editor.state.tr.setSelection(restore.selection))
+    }
+    if (restore.editableFocus) editor.view.focus()
+    else if (restore.activeElement?.focus && document.contains(restore.activeElement)) restore.activeElement.focus({ preventScroll: true })
+  }
+})
+
+document.querySelector('#btnViewerClose').addEventListener('click', closeImageViewer)
+document.querySelector('#btnViewerZoomIn').addEventListener('click', () => setViewerZoom(viewerState.zoom * VIEWER_STEP))
+document.querySelector('#btnViewerZoomOut').addEventListener('click', () => setViewerZoom(viewerState.zoom / VIEWER_STEP))
+document.querySelector('#btnViewerFit').addEventListener('click', fitViewer)
+document.querySelector('#btnViewerActual').addEventListener('click', actualSizeViewer)
+
+// 滚轮：普通滚轮和 Ctrl+滚轮（触控板捏合在 WebView2 里也变成 Ctrl+滚轮）都缩放，
+// 一律 preventDefault —— 查看器里不能让页面或文档跟着滚
+viewerStage.addEventListener('wheel', (event) => {
+  if (!viewerState) return
+  event.preventDefault()
+  const factor = event.deltaY < 0 ? VIEWER_STEP : 1 / VIEWER_STEP
+  setViewerZoom(viewerState.zoom * factor, { x: event.clientX, y: event.clientY })
+}, { passive: false })
+
+// 拖动平移：只有在图片被缩放后才有意义，但任何缩放都允许拖
+viewerStage.addEventListener('pointerdown', (event) => {
+  if (!viewerState || event.button !== 0) return
+  event.preventDefault()
+  viewerDrag = { id: event.pointerId, lastX: event.clientX, lastY: event.clientY }
+  viewerStage.setPointerCapture(event.pointerId)
+  viewerImage.style.cursor = 'grabbing'
+  viewerStage.classList.add('grabbing')
+})
+viewerStage.addEventListener('pointermove', (event) => {
+  if (!viewerDrag || event.pointerId !== viewerDrag.id) return
+  panViewer(event.clientX - viewerDrag.lastX, event.clientY - viewerDrag.lastY)
+  viewerDrag.lastX = event.clientX
+  viewerDrag.lastY = event.clientY
+})
+function endViewerDrag (event) {
+  if (!viewerDrag || (event && event.pointerId !== viewerDrag.id)) return
+  try {
+    viewerStage.releasePointerCapture(viewerDrag.id)
+  } catch {}
+  viewerDrag = null
+  viewerImage.style.cursor = 'grab'
+  viewerStage.classList.remove('grabbing')
+}
+viewerStage.addEventListener('pointerup', endViewerDrag)
+viewerStage.addEventListener('pointercancel', endViewerDrag)
+
+// 双击：适合窗口 ⇄ 100%，指针位置仍作锚点
+viewerStage.addEventListener('dblclick', (event) => {
+  if (!viewerState) return
+  event.preventDefault()
+  const atFit = Math.abs(viewerState.zoom - viewerFitScale()) < 0.001
+  if (atFit) setViewerZoom(1, { x: event.clientX, y: event.clientY })
+  else fitViewer()
+})
+
+// 键盘：+ / - 缩放，0 适合窗口，1 原始大小，方向键平移，Esc 由 <dialog> 自己关
+imageViewer.addEventListener('keydown', (event) => {
+  if (!viewerState || event.defaultPrevented) return
+  if (isMod(event) || event.altKey) return
+  const key = event.key
+  if (key === '+' || key === '=' || key === 'Add') {
+    event.preventDefault()
+    setViewerZoom(viewerState.zoom * VIEWER_STEP)
+    return
+  }
+  if (key === '-' || key === 'Subtract') {
+    event.preventDefault()
+    setViewerZoom(viewerState.zoom / VIEWER_STEP)
+    return
+  }
+  if (key === '0') {
+    event.preventDefault()
+    fitViewer()
+    return
+  }
+  if (key === '1') {
+    event.preventDefault()
+    actualSizeViewer()
+    return
+  }
+  const panStep = event.shiftKey ? 80 : 40
+  if (key === 'ArrowLeft' || key === 'ArrowUp' || key === 'ArrowRight' || key === 'ArrowDown') {
+    event.preventDefault()
+    panViewer(
+      key === 'ArrowLeft' ? -panStep : key === 'ArrowRight' ? panStep : 0,
+      key === 'ArrowUp' ? -panStep : key === 'ArrowDown' ? panStep : 0
+    )
+  }
+})
+
+// Esc 落在 modal 内部的键盘事件上，<dialog> 自己会关；这里只兜住焦点跑到外面的情况
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !imageViewer.open) return
+  event.preventDefault()
+  closeImageViewer()
+}, true)
+
+document.querySelector('#btnPanelViewImage').addEventListener('click', () => {
+  if (!imageEdit) return
+  openImageViewer(imageEdit.pos)
+})
+
+// 给自测脚本用的小接口（不对外）
+window.__wlImageViewer = {
+  isOpen: () => imageViewer.open,
+  open: (pos) => openImageViewer(pos),
+  close: () => closeImageViewer(),
+  state: () => viewerState ? { ...viewerState } : null,
+  fitScale: () => viewerFitScale(),
+  zoom: (value) => setViewerZoom(value),
+  fit: () => fitViewer(),
+  actual: () => actualSizeViewer(),
+  pan: (dx, dy) => panViewer(dx, dy),
+  stage: () => viewerStage,
+  image: () => viewerImage
+}
 
 /* ---------------- 右键菜单 ---------------- */
 
@@ -1725,6 +1984,13 @@ function contextMenuItemsFor (kind, state) {
         shortcut: 'Enter',
         enabled: true,
         run: () => openImageEditor(imagePosFromSelection())
+      },
+      {
+        label: '查看大图',
+        shortcut: 'Space',
+        enabled: true,
+        // 只看不改：打开前选区已经是这张图（prepareContextMenuSelection 已选中节点）
+        run: () => openImageViewer(imagePosFromSelection())
       },
       {
         label: '裁剪',
