@@ -16,6 +16,8 @@ struct WindowDocState {
     dirty: bool,
     allow_close: bool,
     pending_open: Option<String>,
+    // 窗口里现在是什么文档（未命名 = 这张纸还没被用过，可以拿来接从访达打开的文件）
+    file_name: Option<String>,
 }
 
 // macOS 专属的运行时状态：菜单退出流程、访达打开文件的启动期排队
@@ -26,8 +28,12 @@ struct MacState {
     main_ready: std::sync::atomic::AtomicBool,
     // ⌘Q 触发的退出流程进行中
     quitting: std::sync::atomic::AtomicBool,
-    // 退出时要依次关闭的窗口 label
-    quit_queue: Mutex<Vec<String>>,
+    // 退出流程里还没问过的「有未保存内容」的窗口 label
+    quit_dirty: Mutex<Vec<String>>,
+    // 没有未保存内容的窗口：等所有 dirty 的都处理完再关。
+    // 以前是和 dirty 的混在一个队列里按 label 顺序关，干净窗口会先被静默关掉，
+    // 轮到 dirty 的弹框时用户点「取消」，前面那些窗口已经回不来了（§2.4）
+    quit_clean: Mutex<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -151,6 +157,27 @@ fn configure_webview_settings(window: &tauri::WebviewWindow) {
     });
 }
 
+// macOS：WKWebView 默认允许双指捏合做「整体放大」（allowsMagnification / zoomPageByFactors）。
+// 简写没有页面缩放功能，捏合放大后整页会跟着变大、且没有入口还原，
+// 触控板在图片/正文上捏一下就中招（§4.4「有没有导致整页缩放：有」）。
+// 这里关掉网页缩放，捏合手势就只留下事件，不改变界面比例。
+#[cfg(target_os = "macos")]
+fn configure_mac_webview(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        use objc2_web_kit::WKWebView;
+
+        let webview_ptr = webview.inner();
+        if webview_ptr.is_null() {
+            return;
+        }
+        // 指针由 tauri 在主线程上给出，只在本闭包里借用
+        let wk_webview: &WKWebView = unsafe { &*(webview_ptr as *const WKWebView) };
+        unsafe {
+            wk_webview.setAllowsMagnification(false);
+        }
+    });
+}
+
 fn build_document_window(
     app: &tauri::AppHandle,
     label: &str,
@@ -181,6 +208,8 @@ fn build_document_window(
     };
     #[cfg(windows)]
     configure_webview_settings(&window);
+    #[cfg(target_os = "macos")]
+    configure_mac_webview(&window);
     let _ = window.set_focus();
     Ok(window)
 }
@@ -574,25 +603,41 @@ async fn new_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// 访达双击 / 拖到 Dock 图标：启动阶段先排进主窗口的 pending_open，之后一律新开窗口
+// 访达双击 / 拖到 Dock 图标：启动阶段先排进主窗口的 pending_open；
+// 主窗口只是一张没用过的空纸时也直接交给它，已经开着文档才新开一个窗口并排对比
 #[cfg(target_os = "macos")]
 fn open_document_from_system(app: &tauri::AppHandle, path: String) {
     let state = app.state::<AppState>();
     if !take_external_path(&state, &path) {
         return;
     }
-    let startup = !state.mac.main_ready.load(Ordering::SeqCst)
-        && app.get_webview_window("main").is_some();
-    if startup {
-        let queued = state.update("main", |doc| {
-            if doc.pending_open.is_none() {
-                doc.pending_open = Some(path.clone());
-                true
-            } else {
-                false
+    if let Some(window) = app.get_webview_window("main") {
+        // 同一份文件可能先经命令行参数排进主窗口，访达的 openURLs 随后又到。
+        // 已经排过了什么都不做，否则会开出第二个窗口（§2.1「新文档 + 真文档」）
+        let already = state.update("main", |doc| doc.pending_open.as_deref() == Some(path.as_str()));
+        if already {
+            return;
+        }
+        if !state.mac.main_ready.load(Ordering::SeqCst) {
+            state.update("main", |doc| doc.pending_open = Some(path.clone()));
+            return;
+        }
+        // 主窗口就绪了但还是空纸（没有文件名或还叫「未命名文档」、没改动过）：收下这份文件。
+        // 否则访达双击时会先留下一个空窗口，再额外开一个装文档的窗口
+        let file_name = Path::new(&path)
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string());
+        let adopt = state.update("main", |doc| {
+            let blank =
+                !doc.dirty && doc.file_name.as_deref().map_or(true, |cur| cur == "未命名文档");
+            // 顺手占住这张纸：一次打开多个文件时，后到的那个就不会再抢同一个窗口
+            if blank {
+                doc.file_name = file_name.clone();
             }
+            blank
         });
-        if queued {
+        if adopt {
+            let _ = window.emit_to(EventTarget::webview_window("main"), "open-file-path", path);
             return;
         }
     }
@@ -607,7 +652,10 @@ fn set_document_state(
     file_name: String,
 ) {
     let label = window.label().to_string();
-    state.update(&label, |doc| doc.dirty = dirty);
+    state.update(&label, |doc| {
+        doc.dirty = dirty;
+        doc.file_name = Some(file_name.clone());
+    });
     let prefix = if dirty { "*" } else { "" };
     let _ = window.set_title(&format!("{prefix}{file_name} - 简写"));
 }
@@ -639,7 +687,8 @@ fn close_cancelled(state: State<AppState>) {
     #[cfg(target_os = "macos")]
     {
         state.mac.quitting.store(false, Ordering::SeqCst);
-        state.mac.quit_queue.lock().unwrap().clear();
+        state.mac.quit_dirty.lock().unwrap().clear();
+        state.mac.quit_clean.lock().unwrap().clear();
     }
     #[cfg(not(target_os = "macos"))]
     let _ = &state;
@@ -1148,32 +1197,51 @@ fn setup_macos_menu(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-// ⌘Q：先标成退出中，再按窗口顺序一个个走现有的 CloseRequested 保存流程
+// ⌘Q：先标成退出中，再「有未保存内容的窗口先问，干净的窗口排后面」一个个走
+// 现有的 CloseRequested 保存流程。干净窗口一个都不先关，等于给「取消」留了退路。
 #[cfg(target_os = "macos")]
 fn begin_quit(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
-    let mut queue: Vec<String> = app.webview_windows().keys().cloned().collect();
-    if queue.is_empty() {
+    let labels: Vec<String> = app.webview_windows().keys().cloned().collect();
+    if labels.is_empty() {
         app.exit(0);
         return;
     }
-    queue.sort();
+    let mut dirty = Vec::new();
+    let mut clean = Vec::new();
+    for label in labels {
+        if state.update(&label, |doc| doc.dirty) {
+            dirty.push(label);
+        } else {
+            clean.push(label);
+        }
+    }
+    dirty.sort();
+    clean.sort();
     state.mac.quitting.store(true, Ordering::SeqCst);
-    *state.mac.quit_queue.lock().unwrap() = queue;
+    *state.mac.quit_dirty.lock().unwrap() = dirty;
+    *state.mac.quit_clean.lock().unwrap() = clean;
     close_next_for_quit(app);
 }
 
-// 关掉队列里的下一个窗口；队列空了并且一个窗口都不剩才真正退出
+// 关掉队列里的下一个窗口；两个队列都空了并且一个窗口都不剩才真正退出
 #[cfg(target_os = "macos")]
 fn close_next_for_quit(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     loop {
         let next = {
-            let mut queue = state.mac.quit_queue.lock().unwrap();
-            if queue.is_empty() {
-                None
+            let mut dirty = state.mac.quit_dirty.lock().unwrap();
+            if let Some(label) = dirty.first().cloned() {
+                dirty.remove(0);
+                Some(label)
             } else {
-                Some(queue.remove(0))
+                drop(dirty);
+                let mut clean = state.mac.quit_clean.lock().unwrap();
+                if clean.is_empty() {
+                    None
+                } else {
+                    Some(clean.remove(0))
+                }
             }
         };
         let Some(label) = next else {
@@ -1252,6 +1320,12 @@ pub fn run() {
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Some(path) = document_path_from_args(argv) {
+                    // Mac 上「打开方式」会同时触发单实例回调和访达的 openURLs，
+                    // 两条都直连 create_document_window 就会开出两个窗口。
+                    // 统一走 open_document_from_system，它自带同路径去重和空窗口收留
+                    #[cfg(target_os = "macos")]
+                    open_document_from_system(&handle, path);
+                    #[cfg(not(target_os = "macos"))]
                     let _ = create_document_window(&handle, Some(path));
                 } else if let Some(window) = handle.get_webview_window("main") {
                     let _ = window.unminimize();
@@ -1271,6 +1345,10 @@ pub fn run() {
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
                 configure_webview_settings(&window);
+            }
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                configure_mac_webview(&window);
             }
             // 接着已有的 doc 自动保存文件编号，避免新窗口的 label 覆盖旧恢复副本
             if let Ok(dir) = app.path().app_data_dir() {

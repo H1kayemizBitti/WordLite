@@ -435,9 +435,15 @@ editor.view.dom.addEventListener('mousedown', (event) => {
 // 右键也是同一个问题：PM 的 mousedown 里 endComposition 会把还没上屏的拼音就地提交，
 // 等 contextmenu 事件到了再查 composing 已经晚了。所以在 document 捕获阶段（早于
 // view.dom 上的任何监听）就把这次按下截住，PM 根本收不到，组合原样留着。
+// Mac 的 Control+点 是同一种「右键」，但按下事件的 button 是 0、只是 ctrlKey 为 true，
+// 只认 button === 2 的话这道拦截在 Mac 上等于不存在
+function isRightButtonPress (event) {
+  if (event.button === 2) return true
+  return isMac && event.button === 0 && event.ctrlKey
+}
 let composingRightPressAt = 0
 document.addEventListener('mousedown', (event) => {
-  if (event.button !== 2) return
+  if (!isRightButtonPress(event)) return
   composingRightPressAt = 0
   if (!(editor.view.composing || event.isComposing === true)) return
   composingRightPressAt = Date.now()
@@ -1618,8 +1624,12 @@ function onImagePanelKeydown (event) {
       return
     }
   }
-  // 编辑状态按 C 进裁剪
-  if ((event.key === 'c' || event.key === 'C') && !isMod(event) && !isFormTarget(event.target) && !event.altKey) {
+  // 编辑状态按 C 进裁剪。
+  // 面板一打开焦点就落在「宽」的数字框里（openImageEditor 的 rAF 里 focus），
+  // 只让 isFormTarget 挡的话这个 C 永远被输入框吃掉，用户看到的就是「按 C 没反应」。
+  // 数字框本来也输不进字母，所以只放过数字框，其它输入框/下拉框照旧留给它们自己
+  if ((event.key === 'c' || event.key === 'C') && !isMod(event) && !event.altKey &&
+      !isTextFormTarget(event.target)) {
     event.preventDefault()
     event.stopPropagation()
     enterCropMode()
@@ -1678,6 +1688,20 @@ document.addEventListener('keydown', (event) => {
   event.preventDefault()
   event.stopPropagation()
   openImageEditor()
+}, true)
+
+// 选中整张图片后按 C 直接进裁剪。没有这道守卫时这就是普通输入——
+// 选区整个是一张图片节点，敲一个 c 会把它替换成一个字母。
+document.addEventListener('keydown', (event) => {
+  if (imageEdit || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+  if (event.key !== 'c' && event.key !== 'C') return
+  if (isMod(event) || event.altKey || event.shiftKey) return
+  if (isFormTarget(event.target) || document.querySelector('dialog[open]')) return
+  if (editor.state.selection.node?.type.name !== 'image') return
+  event.preventDefault()
+  event.stopPropagation()
+  openImageEditor(editor.state.selection.from)
+  enterCropMode()
 }, true)
 
 // 选中图片后按空格查看大图（和资源管理器习惯一致）。空格在正文里只用来输入空格，
@@ -2432,6 +2456,13 @@ document.addEventListener('click', (e) => {
 
 function isFormTarget (target) {
   return !!target?.closest?.('input, select, textarea')
+}
+
+// 会吃字母的表单控件（数字框只收数字和方向键，按 C 一定没反应，可以不让它当挡箭牌）
+function isTextFormTarget (target) {
+  const el = target?.closest?.('input, select, textarea')
+  if (!el) return false
+  return el.tagName === 'SELECT' || el.type === 'text' || el.type === 'search' || el.tagName === 'TEXTAREA'
 }
 
 /* ---------------- 封堵刷新 ---------------- */
