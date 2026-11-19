@@ -1554,22 +1554,26 @@ pub fn run() {
                                 }}
                                 return down;
                             }}
-                            // 1) F5 / Ctrl+R / Ctrl+Shift+R / Alt+← 都被拦下
+                            // 1) 刷新键都被拦下。各平台的「刷新」不一样：
+                            //    Windows 是 F5 / Ctrl+R / Ctrl+Shift+R / Alt+←，
+                            //    Mac 是 ⌘R / ⌘⇧R；⌥← 在 Mac 上是「按词移动光标」，本来就不该拦
+                            const macPlatform = window.wordlite?.platform === 'mac';
+                            const refreshCases = macPlatform
+                                ? [['F5', 'F5', [], 'F5'], ['MetaR', 'r', ['Meta'], 'KeyR'],
+                                   ['MetaShiftR', 'r', ['Meta', 'Shift'], 'KeyR']]
+                                : [['F5', 'F5', [], 'F5'], ['CtrlR', 'r', ['Control'], 'KeyR'],
+                                   ['CtrlShiftR', 'r', ['Control', 'Shift'], 'KeyR'],
+                                   ['AltLeft', 'ArrowLeft', ['Alt'], 'ArrowLeft']];
                             try {{
                                 const refreshKeys = [];
-                                for (const [name, key, mods, code] of [
-                                    ['F5', 'F5', [], 'F5'],
-                                    ['CtrlR', 'r', ['Control'], 'KeyR'],
-                                    ['CtrlShiftR', 'r', ['Control', 'Shift'], 'KeyR'],
-                                    ['AltLeft', 'ArrowLeft', ['Alt'], 'ArrowLeft']
-                                ]) {{
+                                for (const [name, key, mods, code] of refreshCases) {{
                                     const ev = press(key, mods, code);
                                     refreshKeys.push(name + '=' + ev.defaultPrevented);
                                     results['refreshBlocked_' + name] = ev.defaultPrevented;
                                 }}
                                 results.refreshKeys = refreshKeys.join(' ');
-                                results.refreshBlocked = ['F5', 'CtrlR', 'CtrlShiftR', 'AltLeft']
-                                    .every((name) => results['refreshBlocked_' + name] === true);
+                                results.refreshBlocked = refreshCases
+                                    .every(([name]) => results['refreshBlocked_' + name] === true);
                                 await new Promise((resolve) => setTimeout(resolve, 100));
                                 results.refreshNoReload = noReload();
                             }} catch (refreshError) {{
