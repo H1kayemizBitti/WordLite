@@ -350,9 +350,11 @@
     <div class="crop-handle" data-handle="bottom-right" tabindex="0" aria-label="右下角：拖动或方向键调整"></div>
   </div>
 </div>
-<aside class="image-panel" id="imagePanel" role="dialog" aria-modal="false" aria-label="图片编辑" hidden>
+<aside class="image-panel" id="imagePanel" tabindex="-1" role="dialog" aria-modal="false" aria-label="图片编辑" hidden>
   <div class="image-panel-head">
     <h2>图片编辑</h2>
+    <!-- 焦点默认落在面板本身（tabindex=-1），不落在「宽」：数字框一旦拿到焦点，
+         正在打的拼音会被输入法直接塞进去（§4.4 的「宽度变成 1080c」就是这么来的） -->
   </div>
   <div class="image-panel-body">
     <section class="image-section">

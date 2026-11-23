@@ -861,6 +861,9 @@ body.file-drag-over::after {
 .image-dim[hidden] { display: none; }
 .image-dim-part { position: absolute; background: rgba(16, 24, 40, 0.45); }
 
+/* 面板本体可聚焦（tabindex=-1），但点空白处不该看见一圈描边 */
+.image-panel:focus { outline: none; }
+
 .image-panel {
   position: fixed;
   top: 12px;

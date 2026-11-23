@@ -655,14 +655,64 @@ async function pasteFromClipboard () {
   editor.view.focus()
 }
 
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'bmp']
+const IMAGE_PATH_PATTERN = /\.(png|jpg|jpeg|gif|bmp)$/i
+function imageMime (extension) {
+  return extension === 'jpg' ? 'image/jpeg' : `image/${extension}`
+}
+
+// 正文可用像素宽度：纸张 21cm 去掉左右页边距，按 96dpi（1cm ≈ 37.795px）折算。
+// 直接用编辑器 DOM 实测，窗口缩放 / 自定义页边距都跟得上
+function contentColumnWidth () {
+  const width = editor?.view?.dom?.clientWidth
+  return width > 0 ? width : 600
+}
+
+// 一张图放进页面时该多大：原图按比例缩到不超过正文栏宽。
+// 以前插入时不写尺寸，节点视图又按原图像素铺开，1080px 的图直接顶出纸外。
+// 返回的是「完整原图的显示尺寸」（面板里那一栏就是这个），可见尺寸由裁剪比例算
+function fittedFullSize (natural) {
+  if (!natural?.width || !natural?.height) return { width: null, height: null }
+  const column = contentColumnWidth()
+  if (natural.width <= column) return { width: natural.width, height: natural.height }
+  const scale = column / natural.width
+  return {
+    width: Math.max(1, Math.round(natural.width * scale)),
+    height: Math.max(1, Math.round(natural.height * scale))
+  }
+}
+
+function naturalSizeOfSource (src) {
+  return new Promise((resolve) => {
+    const image = new Image()
+    image.onload = () => resolve({ width: image.naturalWidth || 0, height: image.naturalHeight || 0 })
+    image.onerror = () => resolve({ width: 0, height: 0 })
+    image.src = src
+  })
+}
+
+// 插入图片：先读原图尺寸，按正文栏宽等比缩放后写入 width/height。
+// 「恢复原始大小」回到的也是这个尺寸，所以它永远落在页面里
+async function insertImageAt (src, alt) {
+  const natural = await naturalSizeOfSource(src)
+  const size = fittedFullSize(natural)
+  editor.chain().focus().insertContent({
+    type: 'image',
+    attrs: { src, alt, width: size.width, height: size.height }
+  }).run()
+}
+
+async function insertImageFromPath (filePath) {
+  const data = await fileApi.readFile(filePath, true)
+  const extension = filePath.split('.').pop().toLowerCase()
+  await insertImageAt(`data:${imageMime(extension)};base64,${data}`, fileNameFromPath(filePath))
+}
+
 async function insertImage () {
-  const filePath = await fileApi.showOpenDialog([{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp'] }])
+  const filePath = await fileApi.showOpenDialog([{ name: '图片', extensions: IMAGE_EXTENSIONS }])
   if (!filePath) return
   try {
-    const data = await fileApi.readFile(filePath, true)
-    const extension = filePath.split('.').pop().toLowerCase()
-    const mime = extension === 'jpg' ? 'image/jpeg' : `image/${extension}`
-    editor.chain().focus().setImage({ src: `data:${mime};base64,${data}`, alt: fileNameFromPath(filePath) }).run()
+    await insertImageFromPath(filePath)
   } catch (error) {
     console.error(error)
     showStatus(`图片插入失败：${error.message}`, 0)
@@ -830,11 +880,18 @@ function setPanelFieldValues (attrs) {
     height: img?.naturalHeight || attrNumber(attrs.height) || 200
   }
   const frame = imageCropFrame(attrs, natural)
-  panelWidthInput.value = Math.round(frame.innerWidth || natural.width)
-  panelHeightInput.value = Math.round(frame.innerHeight || natural.height)
-  const fullWidth = Number.parseFloat(panelWidthInput.value)
-  const fullHeight = Number.parseFloat(panelHeightInput.value)
-  if (imageEdit) imageEdit.ratio = fullWidth > 0 && fullHeight > 0 ? fullWidth / fullHeight : 1
+  const fullWidth = Math.round(frame.innerWidth || natural.width)
+  const fullHeight = Math.round(frame.innerHeight || natural.height)
+  panelWidthInput.value = fullWidth
+  panelHeightInput.value = fullHeight
+  // 比例必须取「完整图的宽高比」。裁过的图片按可见尺寸算出来的比例是偏的，
+  // 之后勾着「锁定比例」改宽，高就被算成错的值（§4.4 裁剪后再调尺寸图会变样）
+  const naturalWidth = img?.naturalWidth || fullWidth
+  const naturalHeight = img?.naturalHeight || fullHeight
+  imageEdit.ratio = naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 1
+  // 输入框被塞进了乱七八糟的东西时，按这个兜底，别让宽度变成 NaN
+  imageEdit.panelBaseWidth = fullWidth
+  imageEdit.panelBaseHeight = fullHeight
   panelLockRatio.checked = true
   const crop = attrs.crop || {}
   panelAlign.value = attrs.align || 'left'
@@ -914,12 +971,17 @@ function openImageEditor (pos = null) {
   editor.setEditable(false, false)
   // 实时预览会一直改文档，自动备份先停，退出时再排
   clearTimeout(autosaveTimer)
+  // 下面那次 rAF 里的自动聚焦不算「用户主动用数字框」，别让它把 C 挡掉
+  panelFocusArmedAt = Date.now()
   requestAnimationFrame(() => {
     if (!imageEdit) return
     revealImageAbovePanel(imageEdit.pos, paperLeftBefore)
     if (inCropMode()) syncCropOverlay()
     else syncImageDim()
-    panelWidthInput.focus({ preventScroll: true })
+    // 焦点放在面板本体，而不是「宽」：数字框被自动聚焦时，用户手还在输入法里
+    // 的话，接下来的拼音会被直接写进宽度（§4.4「宽度值后面多出一个 c」）。
+    // 面板拿到焦点，C 就还能被 onImagePanelKeydown 收走进裁剪
+    imagePanel.focus({ preventScroll: true })
   })
   showStatus(`正在编辑图片：${isMac ? '⌘↵' : 'Ctrl+Enter'} 完成，Esc 取消`, 0)
 }
@@ -991,8 +1053,14 @@ function panelAttributes () {
     showStatus('裁剪比例过大：上下或左右之和必须小于 100%', 0)
     return null
   }
-  const fullWidth = panelWidthInput.value === '' ? null : clamp(panelWidthInput.value, 8, 5000, 300)
-  const fullHeight = panelHeightInput.value === '' ? null : clamp(panelHeightInput.value, 8, 5000, 200)
+  // 输入框可能残留字母（输入法 / 粘贴进来的「1080c」）：那是脏值。
+  // 清空了也一样——数字框被 IME 塞进非法字符时浏览器会自己清空，按面板刚打开时的尺寸兜底
+  const readSize = (input, fallback) => {
+    const n = Number(input.value.trim())
+    return Number.isFinite(n) && n > 0 ? clamp(n, 8, 5000, fallback) : fallback
+  }
+  const fullWidth = readSize(panelWidthInput, imageEdit?.panelBaseWidth || 300)
+  const fullHeight = readSize(panelHeightInput, imageEdit?.panelBaseHeight || 200)
   // 输入框里是原图尺寸，写进文档的必须是裁剪后的可见尺寸（和 Word 一致）
   const visibleX = 1 - (crop.left + crop.right) / 100
   const visibleY = 1 - (crop.top + crop.bottom) / 100
@@ -1131,8 +1199,8 @@ function enterCropMode () {
     rect: null,
     // 进裁剪前面板里的「完整原图尺寸」：应用裁剪后回到这个值，
     // 可见尺寸自然按裁掉的比例缩小（和 Word 一样，裁多少小多少）
-    fullWidth: clamp(panelWidthInput.value, 8, 5000, 0) || 0,
-    fullHeight: clamp(panelHeightInput.value, 8, 5000, 0) || 0
+    fullWidth: clamp(panelWidthInput.value, 8, 5000, 0) || imageEdit.panelBaseWidth || 0,
+    fullHeight: clamp(panelHeightInput.value, 8, 5000, 0) || imageEdit.panelBaseHeight || 0
   }
   cropRatioSelect.value = 'free'
   const attrs = editor.state.doc.nodeAt(imageEdit.pos)?.attrs
@@ -1424,16 +1492,24 @@ cropRatioSelect.addEventListener('change', () => {
 document.querySelector('#btnPanelCropMode').addEventListener('click', () => enterCropMode())
 
 
+// 「恢复原始大小」= 回到这张图刚插进来时的样子：按正文栏宽等比缩好的尺寸，
+// 而不是原图像素（4K 截图按原样铺开会顶穿纸张，§4.4 的「恢复原始大小键也失效」）
 function resetPanelSizeToNatural () {
   if (!imageEdit) return
   const img = imageImgEl(imageEdit.pos)
-  // 去掉 width/height → 节点视图按原图自然尺寸显示；裁剪保持不动
-  panelWidthInput.value = img?.naturalWidth || ''
-  panelHeightInput.value = img?.naturalHeight || ''
-  const width = img?.naturalWidth || 0
-  const height = img?.naturalHeight || 0
-  if (width > 0 && height > 0) imageEdit.ratio = width / height
-  scheduleImagePreview({ width: null, height: null })
+  const natural = { width: img?.naturalWidth || 0, height: img?.naturalHeight || 0 }
+  const full = fittedFullSize(natural)
+  // 面板里填的是完整原图尺寸；文档里写可见尺寸，按当前裁剪比例折算
+  panelWidthInput.value = full.width || natural.width || ''
+  panelHeightInput.value = full.height || natural.height || ''
+  if (natural.width > 0 && natural.height > 0) imageEdit.ratio = natural.width / natural.height
+  const crop = {}
+  for (const side of ['top', 'right', 'bottom', 'left']) crop[side] = clamp(panelCropInputs[side].value, 0, 95, 0)
+  const visibleX = 1 - (crop.left + crop.right) / 100
+  const visibleY = 1 - (crop.top + crop.bottom) / 100
+  const width = full.width ? Math.max(1, Math.round(full.width * visibleX)) : null
+  const height = full.height ? Math.max(1, Math.round(full.height * visibleY)) : null
+  scheduleImagePreview({ width, height })
   flushImagePreview()
 }
 
@@ -1627,9 +1703,10 @@ function onImagePanelKeydown (event) {
   // 编辑状态按 C 进裁剪。
   // 面板一打开焦点就落在「宽」的数字框里（openImageEditor 的 rAF 里 focus），
   // 只让 isFormTarget 挡的话这个 C 永远被输入框吃掉，用户看到的就是「按 C 没反应」。
-  // 数字框本来也输不进字母，所以只放过数字框，其它输入框/下拉框照旧留给它们自己
+  // 数字框本来也输不进字母，所以只放过数字框，其它输入框/下拉框照旧留给它们自己。
+  // 但数字框要是被用户碰过（正在改宽度），就得让它自己用——重复按 C 不能把面板踢进裁剪
   if ((event.key === 'c' || event.key === 'C') && !isMod(event) && !event.altKey &&
-      !isTextFormTarget(event.target)) {
+      !isTextFormTarget(event.target) && !isUserNumericTarget(event.target)) {
     event.preventDefault()
     event.stopPropagation()
     enterCropMode()
@@ -2465,6 +2542,29 @@ function isTextFormTarget (target) {
   return el.tagName === 'SELECT' || el.type === 'text' || el.type === 'search' || el.tagName === 'TEXTAREA'
 }
 
+// 数字框只在用户真的碰过它时才算挡箭牌。面板一弹出就自动聚焦「宽」，
+// 这时按 C 必须进裁剪；而数字框本身会吞掉字母再漏一笔 input（§4.4「宽度值后面多一个 c」）
+const numericInputTouched = new WeakSet()
+for (const eventName of ['pointerdown', 'keydown', 'input']) {
+  document.addEventListener(eventName, (event) => {
+    const el = event.target?.closest?.('input[type="number"]')
+    if (el) numericInputTouched.add(el)
+  }, true)
+}
+// Tab 到数字框：焦点变化本身就是用户意图。面板弹开那一瞬间的自动聚焦不算
+let panelFocusArmedAt = 0
+document.addEventListener('focusin', (event) => {
+  const el = event.target?.closest?.('input[type="number"]')
+  if (!el) return
+  if (Date.now() - panelFocusArmedAt < 120) return
+  numericInputTouched.add(el)
+}, true)
+
+function isUserNumericTarget (target) {
+  const el = target?.closest?.('input[type="number"]')
+  return !!el && numericInputTouched.has(el)
+}
+
 /* ---------------- 封堵刷新 ---------------- */
 
 // 页面重载会直接丢掉未保存的内容，刷新和后退对写字板没有任何用处。
@@ -3155,6 +3255,16 @@ function openExternalDocument (filePath) {
 const DRAG_DOCUMENT_PATTERN = /\.(docx|txt)$/i
 let dragDepth = 0
 
+// 拖进来的图片按拖放点落进正文。位置取不到就插在光标处
+async function insertDroppedImage (filePath, event) {
+  const at = editor.view.posAtCoords({ left: event.clientX, top: event.clientY })
+  if (at) editor.chain().focus().setTextSelection(at.pos).run()
+  await insertImageFromPath(filePath)
+  dirty = true
+  updateDocumentState()
+  showStatus(`已插入图片 ${fileNameFromPath(filePath)}`, 4000)
+}
+
 function clearDragState () {
   dragDepth = 0
   document.body.classList.remove('file-drag-over')
@@ -3208,12 +3318,44 @@ document.addEventListener('drop', async (event) => {
     showStatus('无法读取文件路径，请用“打开”按钮选择文件', 0)
     return
   }
+  // 图片按松手位置插进正文（只认浏览器拖放；Tauri 的原生拖放开不了 DOM dataTransfer）
+  if (IMAGE_PATH_PATTERN.test(filePath)) {
+    if (imageEdit || editor.isReadOnly) return
+    insertDroppedImage(filePath, event).catch((error) => {
+      console.error(error)
+      showStatus(`图片插入失败：${error.message}`, 0)
+    })
+    return
+  }
   if (!DRAG_DOCUMENT_PATTERN.test(filePath)) {
-    showStatus('仅支持拖入 .docx 或 .txt 文件', 0)
+    showStatus('仅支持拖入 .docx / .txt 文档，或 png / jpg / gif / bmp 图片', 0)
     return
   }
   openExternalDocument(filePath)
 }, true)
+
+// Tauri 下文件拖放走原生事件（DOM drop 根本不会来），图片和文档在这里分流
+fileApi.onDragDrop?.(({ paths, x, y }) => {
+  const first = paths[0]
+  if (!first) return
+  if (paths.length > 1) {
+    showStatus('一次只能拖入一个文件', 0)
+    return
+  }
+  if (IMAGE_PATH_PATTERN.test(first)) {
+    if (imageEdit || editor.isReadOnly) return
+    insertDroppedImage(first, { clientX: x, clientY: y }).catch((error) => {
+      console.error(error)
+      showStatus(`图片插入失败：${error.message}`, 0)
+    })
+    return
+  }
+  if (!DRAG_DOCUMENT_PATTERN.test(first)) {
+    showStatus('仅支持拖入 .docx / .txt 文档，或 png / jpg / gif / bmp 图片', 0)
+    return
+  }
+  openExternalDocument(first)
+})
 
 async function saveDocument (saveAs = false) {
   if (saveInProgress) return false
@@ -3432,7 +3574,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.0'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.1'}`
 
 /* ---------------- 查找替换 ---------------- */
 
@@ -3849,7 +3991,12 @@ document.querySelector('#btnOpen').addEventListener('click', openDocument)
 document.querySelector('#btnSave').addEventListener('click', () => saveDocument())
 document.querySelector('#btnSaveAs').addEventListener('click', () => saveDocument(true))
 
-fileApi.onOpenFile((filePath) => { openExternalDocument(filePath) })
+// Tauri 的拖放会同时走 onOpenFile 和 onDragDrop：图片归 onDragDrop 插进正文，
+// 这里必须把它筛掉，否则拖一张 png 进来会顺手再开一个「打不开的文档窗口」
+fileApi.onOpenFile((filePath) => {
+  if (IMAGE_PATH_PATTERN.test(filePath)) return
+  openExternalDocument(filePath)
+})
 
 let closePrompting = false
 fileApi.onSaveBeforeClose(async () => {

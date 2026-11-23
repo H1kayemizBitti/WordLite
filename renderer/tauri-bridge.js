@@ -65,6 +65,21 @@
       }
       currentWindow?.listen?.('open-file-path', (event) => callback(event.payload))
     },
+    // 拖放的原始事件：图片要按松手位置插入正文，所以除了路径还得拿到窗口内坐标。
+    // 坐标是物理像素，转成 CSS 像素再交给渲染层
+    onDragDrop: (callback) => {
+      if (!currentWindow?.onDragDropEvent) return
+      const ratio = window.devicePixelRatio || 1
+      currentWindow.onDragDropEvent((event) => {
+        if (event.payload?.type !== 'drop') return
+        const position = event.payload.position || {}
+        callback({
+          paths: event.payload.paths || [],
+          x: (position.x || 0) / ratio,
+          y: (position.y || 0) / ratio
+        })
+      })
+    },
     // macOS 菜单栏：Rust 端把菜单 id 发给当前焦点窗口，这里按约定接收
     onMenuCommand: (callback) => {
       currentWindow?.listen?.('menu-command', (event) => callback(event.payload))
@@ -75,7 +90,7 @@
   window.wordlite = {
     appInfo: {
       name: '简写',
-      version: '1.1.0',
+      version: '1.1.1',
       label: currentWindow?.label || 'main'
     },
     // 渲染层用它决定快捷键和文案：'mac' 或 'win'

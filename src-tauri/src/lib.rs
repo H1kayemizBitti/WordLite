@@ -34,6 +34,10 @@ struct MacState {
     // 以前是和 dirty 的混在一个队列里按 label 顺序关，干净窗口会先被静默关掉，
     // 轮到 dirty 的弹框时用户点「取消」，前面那些窗口已经回不来了（§2.4）
     quit_clean: Mutex<Vec<String>>,
+    // 最近一次「从系统打开文档」的时刻。开场时 Reopen 和 openURLs 会同时来，
+    // Reopen 看到 0 个窗口就先建一张空白纸，紧接着文档又开一个窗口——
+    // 用户看到的就是「第一个冒出新建空白窗口」（§2.1）
+    last_open_request: Mutex<Option<std::time::Instant>>,
 }
 
 #[derive(Default)]
@@ -209,7 +213,11 @@ fn build_document_window(
     #[cfg(windows)]
     configure_webview_settings(&window);
     #[cfg(target_os = "macos")]
-    configure_mac_webview(&window);
+    {
+        configure_mac_webview(&window);
+        // 建窗口这一步发生在异步线程里，系统不会自动把新窗口抬到最前
+        raise_new_window(app, &window);
+    }
     let _ = window.set_focus();
     Ok(window)
 }
@@ -608,6 +616,9 @@ async fn new_window(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn open_document_from_system(app: &tauri::AppHandle, path: String) {
     let state = app.state::<AppState>();
+    // 先打时间戳再去重：即便这次被 1.5 秒去重挡掉，也说明「有文档正在来的路上」，
+    // 单实例回调里的延迟建窗口要靠它让路
+    *state.mac.last_open_request.lock().unwrap() = Some(std::time::Instant::now());
     if !take_external_path(&state, &path) {
         return;
     }
@@ -618,6 +629,9 @@ fn open_document_from_system(app: &tauri::AppHandle, path: String) {
         if already {
             return;
         }
+        // 主窗口还在显示占位内容（渲染层没报 ready）→ 不管有没有 pending 都只排队。
+        // 这里以前只在「没有 pending」时才排队，但 Reopen 抢先生成的那张空白纸
+        // 还没就绪，文件被排进去后紧接着又建了一个 doc-* 窗口，两张纸同时出现
         if !state.mac.main_ready.load(Ordering::SeqCst) {
             state.update("main", |doc| doc.pending_open = Some(path.clone()));
             return;
@@ -642,6 +656,98 @@ fn open_document_from_system(app: &tauri::AppHandle, path: String) {
         }
     }
     let _ = create_document_window(app, Some(path));
+}
+
+// 输入法正在组合时，Mac 的右键（右键点击 / Control+点）会被 WKWebView 的
+// NSTextInputContext 当成「点别处」，把还没上屏的拼音就地丢弃：拼音变成一长串字母
+// 落进正文、选字框还在但空格/数字都不再生效（§6.1 / §6.2 的全部怪现象都出在这里）。
+// 渲染层的 mousedown / contextmenu 拦截只能拦住网页，够不到这一层，
+// 所以在这里挂一个 NSEvent 本地监听，只在「组合中」把右键吞掉，组合原样留着。
+//
+// NSTextInputContext::currentInputContext() 返回的是全局共享的那个上下文，
+// 它跟着当前聚焦的可编辑控件走；问它 client 的 hasMarkedText 就是「正在拼拼音」。
+#[cfg(target_os = "macos")]
+fn install_ime_right_click_guard() {
+    use block2::RcBlock;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{
+        NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSTextInputClient,
+        NSTextInputContext,
+    };
+
+    // run() 本身就在主线程上，直接装；走 run_on_main_thread 会把这件事
+    // 排到事件循环里，万一任务被丢掉就是静默失效
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let block = RcBlock::new(move |event: std::ptr::NonNull<NSEvent>| -> *mut NSEvent {
+        let event = unsafe { event.as_ref() };
+        let composed = NSTextInputContext::currentInputContext(mtm)
+            .map(|context| context.client().hasMarkedText())
+            .unwrap_or(false);
+        // Mac 的「右键」有两副面孔：真右键是 RightMouseDown，
+        // 触控板/鼠标的 Control+点 走的是 LeftMouseDown + Control 修饰键。
+        // 只挡 RightMouseDown 的话 Control+点 照样把拼音打散（§6.1 的主要用法）
+        let right_click = event.r#type() == NSEventType::RightMouseDown
+            || (event.r#type() == NSEventType::LeftMouseDown
+                && event.modifierFlags().contains(NSEventModifierFlags::Control));
+        if composed && right_click {
+            // 返回 null = 这次事件到此为止，不再派发
+            std::ptr::null_mut()
+        } else {
+            event as *const NSEvent as *mut NSEvent
+        }
+    });
+    // 监听留着就得留住：函数退出后 block 被 drop，监听就会拿到悬空指针
+    unsafe {
+        let monitor = NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+            NSEventMask::RightMouseDown
+                | NSEventMask::RightMouseUp
+                | NSEventMask::LeftMouseDown,
+            &block,
+        );
+        if let Some(monitor) = monitor {
+            // 拆开是无效的：NSEvent 文档要求移除监听时把句柄也释放，
+            // 这里索性让它活到进程结束（一个只认指针的短生命周期监听）
+            std::mem::forget(monitor);
+        }
+    }
+}
+
+// 刚建好的 doc-* 窗口：抬到最前并抢键盘焦点。
+// tao 的 set_focus 只对「已经是 key window」的窗口 makeKeyAndOrderFront + 激活应用，
+// 新窗口 inset 层级低、又常建在后台线程上，所以会停在已打开窗口的后面（§2.1 后半）
+#[cfg(target_os = "macos")]
+fn raise_new_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSApplication, NSWindow};
+    use objc2::MainThreadMarker;
+
+    // 裸指针不是 Send，跨线程只传地址本身；闭包是在主线程上执行的，
+    // 窗口此刻一定还活着（刚由我们创建，还没人能关掉它）
+    let ns_window = window.ns_window().ok().map(|ptr| ptr as usize);
+    let handle = app.clone();
+    let label = window.label().to_string();
+    let _ = app.run_on_main_thread(move || {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        unsafe {
+            let app = NSApplication::sharedApplication(mtm);
+            app.activate();
+            if let Some(ptr) = ns_window {
+                let ns_window: &NSWindow = &*(ptr as *const NSWindow);
+                ns_window.makeKeyAndOrderFront(None);
+            }
+        }
+        // 等第一帧画出来再补一次焦点：不占主线程，也留足系统把窗口激活的时间
+        let app_for_later = handle.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            if let Some(window) = app_for_later.get_webview_window(&label) {
+                let _ = window.set_focus();
+            }
+        });
+    });
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -1272,12 +1378,24 @@ fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             ..
         } => {
             if !has_visible_windows {
+                let recent_open = app
+                    .state::<AppState>()
+                    .mac
+                    .last_open_request
+                    .lock()
+                    .unwrap()
+                    .map(|at| at.elapsed().as_millis() < 1200)
+                    .unwrap_or(false);
                 // 点 Dock 图标：窗口只是被最小化或隐藏时把它调出来，一个窗口都没有才新建
                 let mut windows: Vec<tauri::WebviewWindow> =
                     app.webview_windows().into_values().collect();
-                if windows.is_empty() {
+                // 「双击文件启动程序」时系统会先发 Reopen 再发 openURLs：这一刻还没窗口，
+                // 但马上就要开文档窗口了。这时新建一张空白纸，用户会先看到一个空窗口，
+                // 文档窗口随后才出来（§2.1「第一个冒出新建空白窗口」，低概率复现）。
+                // 刚有过打开请求就什么都不做，把窗口让给随后的文档
+                if windows.is_empty() && !recent_open {
                     let _ = create_document_window(app, None);
-                } else {
+                } else if !windows.is_empty() {
                     // 优先主窗口，其次 label 最小的，保证每次点到同一个
                     windows.sort_by(|a, b| {
                         let key = |window: &tauri::WebviewWindow| {
@@ -1334,6 +1452,31 @@ pub fn run() {
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 } else {
+                    // 一个窗口都没有：On Mac 上稍等再建，先看有没有文档要来。
+                    // 访达双击文档时路径走 openURLs，单实例回调的 argv 里根本没有它，
+                    // 两个回调谁先到是随机的；这里立刻补一张空白纸，
+                    // 紧接着 openURLs 再开一个文档窗口，用户就先看到一个空窗口
+                    // （§2.1「第一个冒出新建空白窗口」的低概率复现）
+                    #[cfg(target_os = "macos")]
+                    {
+                        let app_for_later = handle.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(600));
+                            let state = app_for_later.state::<AppState>();
+                            let opening = state
+                                .mac
+                                .last_open_request
+                                .lock()
+                                .unwrap()
+                                .map(|at| at.elapsed().as_millis() < 600)
+                                .unwrap_or(false);
+                            // 期间没有文档进来、也还是没有窗口，才补一张空白纸
+                            if !opening && app_for_later.webview_windows().is_empty() {
+                                let _ = create_document_window(&app_for_later, None);
+                            }
+                        });
+                    }
+                    #[cfg(not(target_os = "macos"))]
                     let _ = create_document_window(&handle, None);
                 }
             });
@@ -2016,6 +2159,10 @@ pub fn run() {
             report_startup_error(&error.to_string());
             std::process::exit(1);
         });
+
+    // 输入法组合中的右键必须挡在 WKWebView 之前（见 install_ime_right_click_guard）
+    #[cfg(target_os = "macos")]
+    install_ime_right_click_guard();
 
     app.run(|app_handle, event| handle_run_event(app_handle, event));
 }
