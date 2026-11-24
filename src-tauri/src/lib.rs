@@ -2161,6 +2161,13 @@ pub fn run() {
                     );
                 }
             }
+            // 切走窗口时组合已经没了：万一渲染层的 compositionend 没送到
+            // （比如切换瞬间的竞态），标志会卡在 true，之后每次右键都被吞掉。
+            // 这比原来的 bug 更糟，所以在原生侧兜一道
+            #[cfg(target_os = "macos")]
+            tauri::WindowEvent::Focused(false) => {
+                IME_COMPOSING.store(false, Ordering::SeqCst);
+            }
             tauri::WindowEvent::Destroyed => {
                 let state = window.state::<AppState>();
                 state.remove(window.label());
