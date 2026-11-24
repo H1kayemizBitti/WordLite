@@ -664,27 +664,43 @@ fn open_document_from_system(app: &tauri::AppHandle, path: String) {
 // 渲染层的 mousedown / contextmenu 拦截只能拦住网页，够不到这一层，
 // 所以在这里挂一个 NSEvent 本地监听，只在「组合中」把右键吞掉，组合原样留着。
 //
-// NSTextInputContext::currentInputContext() 返回的是全局共享的那个上下文，
-// 它跟着当前聚焦的可编辑控件走；问它 client 的 hasMarkedText 就是「正在拼拼音」。
+// 判「正在拼拼音」不靠 AppKit 内部状态：v1.1.1 用 NSTextInputContext 的
+// hasMarkedText() 去问，真机上恒为 false，拦截等于没装（§6.1 每按必现）。
+// 改成渲染层自己上报（compositionstart / compositionend 直接调 set_ime_composing），
+// 原生层只读这一个原子标志。这一条链我们自己能验，不赌 WebKit 内部实现。
+#[cfg(target_os = "macos")]
+static IME_COMPOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+// 非 Mac 平台没有这个原生监听，命令只为了让前端调用不 404（Windows 的组合拦截在渲染层）
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn set_ime_composing(_composing: bool) {}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn set_ime_composing(window: tauri::WebviewWindow, composing: bool) {
+    use std::sync::atomic::Ordering;
+    // 只有键盘窗口能改这个标志：多窗口时别让后台窗口的组合状态误吞前台窗口的右键
+    if window.is_focused().unwrap_or(false) {
+        IME_COMPOSING.store(composing, Ordering::SeqCst);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn install_ime_right_click_guard() {
     use block2::RcBlock;
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{
-        NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSTextInputClient,
-        NSTextInputContext,
-    };
+    use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
+    use std::sync::atomic::Ordering;
 
-    // run() 本身就在主线程上，直接装；走 run_on_main_thread 会把这件事
-    // 排到事件循环里，万一任务被丢掉就是静默失效
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
+    let mtm = match MainThreadMarker::new() {
+        Some(mtm) => mtm,
+        // 不在主线程时监听装不了；退化成「不拦」，至少不会挡住正常右键
+        None => return,
     };
     let block = RcBlock::new(move |event: std::ptr::NonNull<NSEvent>| -> *mut NSEvent {
         let event = unsafe { event.as_ref() };
-        let composed = NSTextInputContext::currentInputContext(mtm)
-            .map(|context| context.client().hasMarkedText())
-            .unwrap_or(false);
+        let composed = IME_COMPOSING.load(Ordering::SeqCst);
         // Mac 的「右键」有两副面孔：真右键是 RightMouseDown，
         // 触控板/鼠标的 Control+点 走的是 LeftMouseDown + Control 修饰键。
         // 只挡 RightMouseDown 的话 Control+点 照样把拼音打散（§6.1 的主要用法）
@@ -712,6 +728,7 @@ fn install_ime_right_click_guard() {
             std::mem::forget(monitor);
         }
     }
+    let _ = mtm;
 }
 
 // 刚建好的 doc-* 窗口：抬到最前并抢键盘焦点。
@@ -1724,13 +1741,16 @@ pub fn run() {
                                 results.refreshError = String(refreshError);
                             }}
                             // 2) 正文里 Ctrl+R 仍然是右对齐：拦刷新不能把右对齐一起拦掉
+                            // Mac 上修饰键是 ⌘ 不是 Ctrl，硬编码 ctrlKey 会让这条在 Mac 上
+                            // 永远为 false（CI 日志里 alignRightShortcut=false 就是这个原因）
+                            const modKey = window.wordlite?.platform === 'mac' ? 'metaKey' : 'ctrlKey';
                             try {{
                                 const ed = editorEl.editor;
                                 ed.chain().focus().setContent('<p>右对齐检查</p>').run();
                                 ed.chain().selectAll().setTextAlign('left').run();
                                 await new Promise((resolve) => setTimeout(resolve, 100));
                                 editorEl.dispatchEvent(new KeyboardEvent('keydown', {{
-                                    key: 'r', code: 'KeyR', ctrlKey: true, bubbles: true, cancelable: true
+                                    key: 'r', code: 'KeyR', [modKey]: true, bubbles: true, cancelable: true
                                 }}));
                                 await new Promise((resolve) => setTimeout(resolve, 150));
                                 results.alignRightShortcut = ed.getAttributes('paragraph').textAlign === 'right';
@@ -1742,7 +1762,7 @@ pub fn run() {
                             try {{
                                 editorEl.focus();
                                 editorEl.dispatchEvent(new KeyboardEvent('keydown', {{
-                                    key: 'f', code: 'KeyF', ctrlKey: true, bubbles: true, cancelable: true
+                                    key: 'f', code: 'KeyF', [modKey]: true, bubbles: true, cancelable: true
                                 }}));
                                 await new Promise((resolve) => setTimeout(resolve, 150));
                                 results.findOpened = !document.querySelector('#findBar').hidden;
@@ -1837,7 +1857,7 @@ pub fn run() {
                                 ed3.chain().focus().setContent('<p>键盘菜单检查</p><p>第二段</p>').run();
                                 ed3.chain().focus('end').run();
                                 document.dispatchEvent(new KeyboardEvent('keydown', {{
-                                    key: 'f', code: 'KeyF', ctrlKey: true, bubbles: true, cancelable: true
+                                    key: 'f', code: 'KeyF', [modKey]: true, bubbles: true, cancelable: true
                                 }}));
                                 await new Promise((resolve) => setTimeout(resolve, 100));
                                 results.findBarOpenBeforeEsc = !document.querySelector('#findBar').hidden;
@@ -2123,6 +2143,7 @@ pub fn run() {
             print_document,
             print_to_pdf,
             export_pdf,
+            set_ime_composing,
             selftest_ready,
             selftest_report
         ])

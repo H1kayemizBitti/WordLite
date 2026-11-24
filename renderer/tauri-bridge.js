@@ -84,13 +84,18 @@
     onMenuCommand: (callback) => {
       currentWindow?.listen?.('menu-command', (event) => callback(event.payload))
     },
+    // 输入法组合状态上报给原生层：组合中的右键必须在那之前被吞掉，否则
+    // WKWebView 会把没上屏的拼音就地摊成字母（§6.1 / §6.2）。失败不吵人
+    setImeComposing: (composing) => {
+      invoke('set_ime_composing', { composing }).catch(() => {})
+    },
     notifyReady: () => invoke('renderer_ready')
   }
 
   window.wordlite = {
     appInfo: {
       name: '简写',
-      version: '1.1.1',
+      version: '1.1.2',
       label: currentWindow?.label || 'main'
     },
     // 渲染层用它决定快捷键和文案：'mac' 或 'win'

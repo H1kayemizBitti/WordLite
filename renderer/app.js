@@ -421,6 +421,25 @@ function dragScrollEnd () {
   document.removeEventListener('drop', dragScrollEnd)
 }
 
+// 组合状态要报给原生层（Mac）：WKWebView 收到右键时会在原生层就把没上屏的拼音
+// 摊成字母，渲染层拦不住。原生监听只认这一个标志，所以它必须跟真组合同生共死
+if (isMac && fileApi.setImeComposing) {
+  let reportingCompose = false
+  const reportCompose = (composing) => {
+    if (reportingCompose === composing) return
+    reportingCompose = composing
+    fileApi.setImeComposing(composing)
+  }
+  for (const type of ['compositionstart', 'compositionend']) {
+    document.addEventListener(type, () => reportCompose(type === 'compositionstart'), true)
+  }
+  // 失焦 / 切窗口时组合已经没了，别把标志留在 true 上（否则下一次右键会被莫名吞掉）
+  window.addEventListener('blur', () => reportCompose(false), true)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) reportCompose(false)
+  }, true)
+}
+
 // ProseMirror 的 mousedown 第一件事就是 endComposition，等 dragstart 再查
 // view.composing 永远是 false。所以在捕获阶段先记下「按下那一刻」是否在组合中。
 let composingAtPress = false
@@ -3574,7 +3593,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.1'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.2'}`
 
 /* ---------------- 查找替换 ---------------- */
 
