@@ -2741,6 +2741,18 @@ document.addEventListener('keydown', (e) => {
     applyFormatPainter()
     return
   }
+  // 页面缩放：Ctrl+Shift+= / Ctrl+Shift+-。必须排在下面的上下标分支之前——
+  // 那条 e.code === 'Equal' 不带 shiftKey 判断，会连 Ctrl+Shift+= 一起吃掉
+  if (e.shiftKey && e.code === 'Equal') {
+    e.preventDefault()
+    stepPageZoom(1)
+    return
+  }
+  if (e.shiftKey && e.code === 'Minus') {
+    e.preventDefault()
+    stepPageZoom(-1)
+    return
+  }
   if (e.code === 'Equal') {
     e.preventDefault()
     if (e.shiftKey) editor.chain().focus().toggleSuperscript().run()
@@ -2783,14 +2795,15 @@ document.addEventListener('keydown', (e) => {
     editor.chain().focus().setParagraph().run()
     return
   }
-  // 页面缩放：Ctrl+= / Ctrl+- 和 Ctrl+0 回 100%（Word 的键位）。
-  // 上面 e.code === 'Equal' 那条是字号上下标，只有不带 Ctrl 才会走到
-  if (e.code === 'Equal' || key === '+' || key === '=') {
+  // 页面缩放用 Ctrl+Shift+= / Ctrl+Shift+-：Ctrl+= 和 Ctrl+Shift+= 在这个
+  // 软件里已经是下标/上标（Word 的约定），Ctrl+0 是「正文」，不能抢。
+  // e.code 判断是因为按住 Shift 时 e.key 会变成 '+' / '_'
+  if (e.shiftKey && e.code === 'Equal') {
     e.preventDefault()
     stepPageZoom(1)
     return
   }
-  if (e.code === 'Minus' || key === '-') {
+  if (e.shiftKey && e.code === 'Minus') {
     e.preventDefault()
     stepPageZoom(-1)
     return
