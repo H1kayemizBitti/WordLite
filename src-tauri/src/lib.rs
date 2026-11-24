@@ -1656,6 +1656,34 @@ pub fn run() {
                                     results.longError = String(longError);
                                 }}
                             }}
+                            // 页面缩放：只在状态栏改纸张的显示比例，字号和文档内容都不动
+                            try {{
+                                const paperEl = document.querySelector('.paper');
+                                const domEl = document.querySelector('.ProseMirror');
+                                const zoomLabel = document.querySelector('#btnZoomReset');
+                                const zoomIn = document.querySelector('#btnZoomIn');
+                                const zoomOut = document.querySelector('#btnZoomOut');
+                                results.pageZoomControls = !!zoomLabel && !!zoomIn && !!zoomOut;
+                                zoomLabel.click();
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                const columnAt100 = domEl.clientWidth;
+                                const paperAt100 = paperEl.getBoundingClientRect().width;
+                                zoomOut.click();
+                                await new Promise((resolve) => setTimeout(resolve, 150));
+                                const shrunk = paperEl.style.zoom;
+                                const paperAt90 = paperEl.getBoundingClientRect().width;
+                                // 排版像素不变：图片宽度和点击定位都按 clientWidth 算，它必须纹丝不动
+                                const columnAt90 = domEl.clientWidth;
+                                results.pageZoomShrinks = shrunk === '0.9' && paperAt90 < paperAt100 * 0.95;
+                                results.pageZoomKeepsLayout = columnAt90 === columnAt100;
+                                results.pageZoomLabel = zoomLabel.textContent;
+                                results.pageZoomStored = JSON.parse(localStorage.getItem('wordlite.zoom.v1'));
+                                zoomLabel.click();
+                                await new Promise((resolve) => setTimeout(resolve, 120));
+                                results.pageZoomReset = paperEl.style.zoom === '' && zoomLabel.textContent === '100%';
+                            }} catch (zoomError) {{
+                                results.pageZoomError = String(zoomError);
+                            }}
                             try {{
                                 await withTimeout(window.__TAURI__.core.invoke('open_external', {{ path: {probe} }}), 5000);
                                 // 立刻重复一次，验证 1.5 秒内的同路径去重（不应再开窗口）

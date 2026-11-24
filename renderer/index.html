@@ -318,6 +318,12 @@
   <span id="wordCount">字数 0</span>
   <span id="fileStatus"></span>
   <span class="status-badge" title="所有文件只在本机读写，不联网">离线 · 本地保存</span>
+  <!-- 页面缩放：只缩纸张，字号和排版比例不变，打印机/导出 PDF 不受影响 -->
+  <span class="zoom-box" id="zoomBox" role="group" aria-label="页面缩放">
+    <button class="zoom-btn" id="btnZoomOut" type="button" title="缩小页面（Ctrl+滚轮）">−</button>
+    <button class="zoom-value" id="btnZoomReset" type="button" title="回到实际大小 100%">100%</button>
+    <button class="zoom-btn" id="btnZoomIn" type="button" title="放大页面（Ctrl+滚轮）">+</button>
+  </span>
 </footer>
 
 <!-- 右键菜单：按位置现拼菜单项，role=menu 供键盘导航 -->
@@ -556,6 +562,11 @@
         <span>项目符号 / 编号</span><kbd>Ctrl+Shift+8 / 7</kbd>
         <span>增减缩进 / 减少缩进</span><kbd>Ctrl+M / Ctrl+Shift+M</kbd>
         <span>插入分页符</span><kbd>Ctrl+Enter</kbd>
+      </div>
+      <h3>页面显示</h3>
+      <div class="shortcut-grid">
+        <span>放大 / 缩小页面</span><kbd>Ctrl+滚轮 · Ctrl+= / -</kbd>
+        <span>回到实际大小</span><kbd>点状态栏的百分比</kbd>
       </div>
       <p class="dialog-note">图片：选中后双击（或按 Enter）打开右侧编辑面板，支持精确宽高、对齐、文字环绕、裁剪和更换；改宽度、环绕时正文实时重排，按 C 进裁剪，Enter 或 Ctrl+Enter 完成（裁剪状态下 Enter = 应用裁剪），Esc 取消，一次编辑只占一步撤销。选中图片后按空格、或右键「查看大图」可打开只读的查看器（滚轮缩放、拖动平移，不改文档）。表格：拖动列边线调整列宽，选中多个单元格后可合并，插入标签页可设置边框和底色。</p>
     </section>

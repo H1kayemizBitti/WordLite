@@ -576,6 +576,46 @@ body.file-drag-over::after {
   box-shadow: 0 0 0 2px rgba(34, 160, 107, 0.18);
 }
 
+/* 页面缩放：状态栏右侧的小控件，和字数之间自动撑开 */
+.zoom-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 1px;
+  border-radius: 6px;
+  background: #e9ecf1;
+}
+
+.zoom-btn {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoom-btn:hover { background: rgba(16, 24, 40, 0.08); }
+.zoom-btn:disabled { color: #b3b9c4; cursor: default; background: transparent; }
+
+.zoom-value {
+  min-width: 44px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #4b5563;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.zoom-value:hover { background: rgba(16, 24, 40, 0.08); }
+
 /* ---------- 查找替换 ---------- */
 
 .find-bar {
@@ -1309,6 +1349,8 @@ body.file-drag-over::after {
     max-width: none !important;
     min-height: 0 !important;
     margin: 0;
+    /* 屏幕上的缩放只管看，纸面必须是 100%：不然 PDF 会跟着放大缩小 */
+    zoom: 1 !important;
     padding: 0 !important;
     box-shadow: none !important;
     background-image: none !important;

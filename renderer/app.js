@@ -2783,6 +2783,18 @@ document.addEventListener('keydown', (e) => {
     editor.chain().focus().setParagraph().run()
     return
   }
+  // 页面缩放：Ctrl+= / Ctrl+- 和 Ctrl+0 回 100%（Word 的键位）。
+  // 上面 e.code === 'Equal' 那条是字号上下标，只有不带 Ctrl 才会走到
+  if (e.code === 'Equal' || key === '+' || key === '=') {
+    e.preventDefault()
+    stepPageZoom(1)
+    return
+  }
+  if (e.code === 'Minus' || key === '-') {
+    e.preventDefault()
+    stepPageZoom(-1)
+    return
+  }
   // Mac 上 ⌘M 是系统「最小化」，缩进改用 ⌘] / ⌘[（由 Indent 扩展自带的 Mod-] / Mod-[ 处理）
   if (key === 'm' && !isMac) {
     e.preventDefault()
@@ -2956,6 +2968,77 @@ function setPageSetup (patch) {
   applyPageSetup()
   setDirty(true)
 }
+
+/* ---------------- 页面缩放 ---------------- */
+
+// 只缩纸张的显示，不改字号、行高和排版比例，所以打印和导出 PDF 完全不受影响。
+// 之所以能这么干：.paper 上的 zoom 让 getBoundingClientRect 跟着缩，
+// 而 clientWidth 仍是排版像素——图片按栏宽算尺寸、点击定位都不用改。
+const ZOOM_KEY = 'wordlite.zoom.v1'
+const ZOOM_MIN = 50
+const ZOOM_MAX = 200
+// 一档一档走，不做连续缩放：触控板一次手势会连发几十个 wheel 事件
+const ZOOM_STEPS = [50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200]
+let pageZoom = clamp(storageRead(ZOOM_KEY, 100), ZOOM_MIN, ZOOM_MAX, 100)
+
+function applyPageZoom (next) {
+  const value = clamp(Math.round(Number(next) || 0), ZOOM_MIN, ZOOM_MAX, pageZoom)
+  const paper = document.querySelector('.paper')
+  if (!paper) return
+  // 缩放前后尽量停在同一位：按滚动比例还原，放大不会把你顶回文首
+  const keepRatio = workspaceEl.scrollHeight > 0
+    ? workspaceEl.scrollTop / workspaceEl.scrollHeight
+    : 0
+  pageZoom = value
+  paper.style.zoom = value === 100 ? '' : `${value / 100}`
+  storageWrite(ZOOM_KEY, value)
+  const label = document.querySelector('#btnZoomReset')
+  label.textContent = `${value}%`
+  document.querySelector('#btnZoomOut').disabled = value <= ZOOM_MIN
+  document.querySelector('#btnZoomIn').disabled = value >= ZOOM_MAX
+  requestAnimationFrame(() => {
+    if (keepRatio && workspaceEl.scrollHeight > 0) {
+      workspaceEl.scrollTop = keepRatio * workspaceEl.scrollHeight
+    }
+    if (imageEdit) {
+      if (inCropMode()) syncCropOverlay()
+      else syncImageDim()
+    }
+  })
+}
+
+function stepPageZoom (direction) {
+  if (direction > 0) {
+    const next = ZOOM_STEPS.find((step) => step > pageZoom)
+    if (next) applyPageZoom(next)
+  } else if (direction < 0) {
+    const prev = ZOOM_STEPS.filter((step) => step < pageZoom).pop()
+    if (prev) applyPageZoom(prev)
+  }
+}
+
+// Ctrl+滚轮（Mac 上是 ⌘+滚轮）缩放页面。Mac 的双指捏合走的是系统手势、
+// 不是带修饰键的 wheel，所以不会误触——§4.4 那条「捏合不该缩放」仍然成立
+function isZoomWheel (event) {
+  return isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
+}
+
+let lastZoomWheelAt = 0
+window.addEventListener('wheel', (event) => {
+  if (!isZoomWheel(event) || event.deltaY === 0) return
+  // 模态框（设置、帮助、图片查看器）都有自己的滚轮语义，不放给页面缩放
+  if (document.querySelector('dialog[open]')) return
+  event.preventDefault()
+  // 触控板惯性会连续发事件：两档之间留 120ms，免得一下滑到底
+  const now = Date.now()
+  if (now - lastZoomWheelAt < 120) return
+  lastZoomWheelAt = now
+  stepPageZoom(event.deltaY < 0 ? 1 : -1)
+}, { passive: false, capture: true })
+
+document.querySelector('#btnZoomIn').addEventListener('click', () => stepPageZoom(1))
+document.querySelector('#btnZoomOut').addEventListener('click', () => stepPageZoom(-1))
+document.querySelector('#btnZoomReset').addEventListener('click', () => applyPageZoom(100))
 
 document.querySelector('#pageSize').addEventListener('change', (e) => setPageSetup({ size: e.target.value }))
 document.querySelector('#pageOrientation').addEventListener('change', (e) => setPageSetup({ orientation: e.target.value }))
@@ -3593,7 +3676,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.2'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.3'}`
 
 /* ---------------- 查找替换 ---------------- */
 
@@ -4073,6 +4156,7 @@ updateStatusBar()
 syncToolbar()
 updateDocumentState()
 applyPageSetup()
+applyPageZoom(pageZoom)
 scheduleAutoSave()
 // 自动备份恢复询问结束后再收“打开方式”的文档，避免两个对话框同时弹出
 async function finishStartup () {
