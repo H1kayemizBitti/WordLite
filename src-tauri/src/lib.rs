@@ -92,7 +92,9 @@ fn next_doc_label() -> String {
 
 // Windows 生产版的兜底：从 WebView2 层面关掉浏览器默认右键菜单和浏览器快捷键。
 // 渲染层已经拦了 contextmenu 和 F5/Ctrl+R，这里再上一层，防止 WebView2 以后改了事件顺序。
-// 只关这两项：Ctrl+C/X/V/Z/Y/A、输入法、Ctrl+滚轮缩放都还由 Chromium 自己处理。
+// 只关这几项：Ctrl+C/X/V/Z/Y/A、输入法仍由 Chromium 自己处理。
+// Ctrl+滚轮缩放要关掉：v1.1.3 起页面缩放由渲染层自己实现（只缩纸张），
+// 留着 WebView2 内建的整页缩放会跟着一起放大，变成双重缩放。
 // debug 构建不动，保留默认菜单和开发者工具（R-09）。
 #[cfg(windows)]
 fn configure_webview_settings(window: &tauri::WebviewWindow) {
@@ -122,6 +124,10 @@ fn configure_webview_settings(window: &tauri::WebviewWindow) {
                     .map_err(|e| e.to_string())?;
                 settings3
                     .SetAreBrowserAcceleratorKeysEnabled(false)
+                    .map_err(|e| e.to_string())?;
+                // Ctrl+滚轮交给渲染层：内建缩放关掉，否则纸张缩放和整页缩放会叠在一起
+                settings3
+                    .SetIsZoomControlEnabled(false)
                     .map_err(|e| e.to_string())?;
             }
             // 自定义菜单里的「粘贴」要读剪贴板；WebView2 默认会弹权限框。
