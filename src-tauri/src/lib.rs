@@ -325,7 +325,13 @@ unsafe fn handle_zoom_gesture(
         return;
     }
     let start = GESTURE_START_DISTANCE.load(Ordering::SeqCst);
-    if start > 0 {
+    if start == 0 {
+        // 有的设备第一帧距离给 0：拿第一个非零距离当起点，别让整次捏合作废
+        if info.ullArguments > 0 {
+            GESTURE_START_DISTANCE.store(info.ullArguments, Ordering::SeqCst);
+            GESTURE_LAST_SCALE_MILLI.store(1000, Ordering::SeqCst);
+        }
+    } else if info.ullArguments > 0 {
         let scale = info.ullArguments as f64 / start as f64;
         let milli = (scale * 1000.0).round() as u64;
         // 只送变化超过 0.5% 的，避免每个原始事件都进一次 eval
