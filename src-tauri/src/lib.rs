@@ -227,8 +227,12 @@ unsafe extern "system" fn collect_child_window(
 
 #[cfg(windows)]
 unsafe fn install_gesture_subclass(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::UI::Input::Touch::{RegisterTouchWindow, TWF_FINETOUCH};
     use windows::Win32::UI::Shell::SetWindowSubclass;
 
+    // 手势引擎只往注册过触摸的窗口发 WM_GESTURE；WebView2 自己可能已经注册过，
+    // 重复注册会被系统忽略，这里补一道不亏。
+    let _ = unsafe { RegisterTouchWindow(hwnd, TWF_FINETOUCH) };
     let _ = unsafe { SetWindowSubclass(hwnd, Some(gesture_subclass_proc), 0x5712, 0) };
     unsafe { apply_gesture_config(hwnd) };
 }
