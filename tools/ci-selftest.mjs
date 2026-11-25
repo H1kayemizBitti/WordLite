@@ -6,7 +6,9 @@ const PREFIX = '[selftest] '
 const REQUIRED_BOOL = [
   'bridge', 'tauri', 'editor', 'openedNewWindow', 'blankDragOk', 'contextMenuOk', 'printPreviewRemoved',
   // 页面缩放：控件在、缩放生效、排版像素不变、能回 100%
-  'pageZoomControls', 'pageZoomShrinks', 'pageZoomKeepsLayout', 'pageZoomReset'
+  'pageZoomControls', 'pageZoomShrinks', 'pageZoomKeepsLayout', 'pageZoomReset',
+  // 触控板捏合：预览不写存储、松手落定、有弹窗时忽略
+  'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',

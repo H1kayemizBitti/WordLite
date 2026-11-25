@@ -1690,6 +1690,46 @@ pub fn run() {
                             }} catch (zoomError) {{
                                 results.pageZoomError = String(zoomError);
                             }}
+                            // 触控板捏合：Mac 走 gesture* 事件（Windows 触控板是 Ctrl+滚轮，已在上面验）
+                            // 这里用合成事件验「预览不写存储 → 松手落定 → 有弹窗时忽略」
+                            try {{
+                                const paperEl = document.querySelector('.paper');
+                                const zoomLabel = document.querySelector('#btnZoomReset');
+                                const fireGesture = (type, scale) => {{
+                                    const event = new Event(type, {{ bubbles: true, cancelable: true }});
+                                    Object.defineProperty(event, 'scale', {{ value: scale }});
+                                    window.dispatchEvent(event);
+                                    return event.defaultPrevented;
+                                }};
+                                zoomLabel.click();
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                const pinchPrevented = [fireGesture('gesturestart', 1)];
+                                pinchPrevented.push(fireGesture('gesturechange', 1.25));
+                                await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+                                results.pagePinchPreview = pinchPrevented.every(Boolean) &&
+                                    paperEl.style.zoom === '1.25' &&
+                                    zoomLabel.textContent === '125%' &&
+                                    JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === 100;
+                                fireGesture('gestureend', 1.25);
+                                await new Promise((resolve) => setTimeout(resolve, 120));
+                                results.pagePinchCommits = paperEl.style.zoom === '1.25' &&
+                                    zoomLabel.textContent === '125%' &&
+                                    JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === 125;
+                                zoomLabel.click();
+                                await new Promise((resolve) => setTimeout(resolve, 100));
+                                const probeDialog = document.createElement('dialog');
+                                document.body.appendChild(probeDialog);
+                                probeDialog.showModal();
+                                fireGesture('gesturestart', 1);
+                                fireGesture('gesturechange', 1.5);
+                                await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+                                results.pagePinchIgnoresDialog = zoomLabel.textContent === '100%' &&
+                                    paperEl.style.zoom === '';
+                                probeDialog.close();
+                                probeDialog.remove();
+                            }} catch (pinchError) {{
+                                results.pagePinchError = String(pinchError);
+                            }}
                             try {{
                                 await withTimeout(window.__TAURI__.core.invoke('open_external', {{ path: {probe} }}), 5000);
                                 // 立刻重复一次，验证 1.5 秒内的同路径去重（不应再开窗口）

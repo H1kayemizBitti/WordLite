@@ -2994,21 +2994,25 @@ const ZOOM_MAX = 200
 const ZOOM_STEPS = [50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200]
 let pageZoom = clamp(storageRead(ZOOM_KEY, 100), ZOOM_MIN, ZOOM_MAX, 100)
 
+function renderPageZoom (value) {
+  const paper = document.querySelector('.paper')
+  if (!paper) return false
+  paper.style.zoom = value === 100 ? '' : `${value / 100}`
+  document.querySelector('#btnZoomReset').textContent = `${value}%`
+  document.querySelector('#btnZoomOut').disabled = value <= ZOOM_MIN
+  document.querySelector('#btnZoomIn').disabled = value >= ZOOM_MAX
+  return true
+}
+
 function applyPageZoom (next) {
   const value = clamp(Math.round(Number(next) || 0), ZOOM_MIN, ZOOM_MAX, pageZoom)
-  const paper = document.querySelector('.paper')
-  if (!paper) return
+  if (!renderPageZoom(value)) return
   // 缩放前后尽量停在同一位：按滚动比例还原，放大不会把你顶回文首
   const keepRatio = workspaceEl.scrollHeight > 0
     ? workspaceEl.scrollTop / workspaceEl.scrollHeight
     : 0
   pageZoom = value
-  paper.style.zoom = value === 100 ? '' : `${value / 100}`
   storageWrite(ZOOM_KEY, value)
-  const label = document.querySelector('#btnZoomReset')
-  label.textContent = `${value}%`
-  document.querySelector('#btnZoomOut').disabled = value <= ZOOM_MIN
-  document.querySelector('#btnZoomIn').disabled = value >= ZOOM_MAX
   requestAnimationFrame(() => {
     if (keepRatio && workspaceEl.scrollHeight > 0) {
       workspaceEl.scrollTop = keepRatio * workspaceEl.scrollHeight
@@ -3029,6 +3033,62 @@ function stepPageZoom (direction) {
     if (prev) applyPageZoom(prev)
   }
 }
+
+// Mac 触控板的双指捏合在 WKWebView 里走 gesturestart / gesturechange / gestureend，
+// 不是带修饰键的 wheel（Windows 触控板的捏合才被 WebView2 合成成 Ctrl+滚轮）。
+// allowsMagnification 关掉后事件仍然会到网页，正好借它接进页面缩放：
+// 手势期间只改显示，松手才写存储，免得一次捏合写几十次 localStorage。
+let pinchBaseZoom = null
+let pinchPreviewZoom = null
+let pinchFrame = 0
+
+function gestureScale (event) {
+  const scale = Number(event.scale)
+  return Number.isFinite(scale) && scale > 0 ? scale : 1
+}
+
+function queuePinchPreview (value) {
+  pinchPreviewZoom = value
+  if (pinchFrame) return
+  pinchFrame = requestAnimationFrame(() => {
+    pinchFrame = 0
+    if (pinchPreviewZoom !== null) renderPageZoom(pinchPreviewZoom)
+  })
+}
+
+window.addEventListener('gesturestart', (event) => {
+  if (document.querySelector('dialog[open]')) return
+  event.preventDefault()
+  if (pinchFrame) {
+    cancelAnimationFrame(pinchFrame)
+    pinchFrame = 0
+  }
+  pinchBaseZoom = pageZoom
+  pinchPreviewZoom = null
+  renderPageZoom(pageZoom)
+}, { passive: false, capture: true })
+
+window.addEventListener('gesturechange', (event) => {
+  if (pinchBaseZoom === null) return
+  event.preventDefault()
+  queuePinchPreview(clamp(
+    Math.round(pinchBaseZoom * gestureScale(event)),
+    ZOOM_MIN, ZOOM_MAX, pinchBaseZoom
+  ))
+}, { passive: false, capture: true })
+
+window.addEventListener('gestureend', (event) => {
+  if (pinchBaseZoom === null) return
+  event.preventDefault()
+  if (pinchFrame) {
+    cancelAnimationFrame(pinchFrame)
+    pinchFrame = 0
+  }
+  const finalZoom = pinchPreviewZoom === null ? pinchBaseZoom : pinchPreviewZoom
+  pinchBaseZoom = null
+  pinchPreviewZoom = null
+  applyPageZoom(finalZoom)
+}, { passive: false, capture: true })
 
 // Ctrl+滚轮（Mac 上是 ⌘+滚轮）缩放页面。Mac 的双指捏合走的是系统手势、
 // 不是带修饰键的 wheel，所以不会误触——§4.4 那条「捏合不该缩放」仍然成立
@@ -3689,7 +3749,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.3'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.4'}`
 
 /* ---------------- 查找替换 ---------------- */
 
