@@ -3056,9 +3056,8 @@ function queuePinchPreview (value) {
   })
 }
 
-window.addEventListener('gesturestart', (event) => {
-  if (document.querySelector('dialog[open]')) return
-  event.preventDefault()
+function beginPinchZoom () {
+  if (document.querySelector('dialog[open]')) return false
   if (pinchFrame) {
     cancelAnimationFrame(pinchFrame)
     pinchFrame = 0
@@ -3066,20 +3065,20 @@ window.addEventListener('gesturestart', (event) => {
   pinchBaseZoom = pageZoom
   pinchPreviewZoom = null
   renderPageZoom(pageZoom)
-}, { passive: false, capture: true })
+  return true
+}
 
-window.addEventListener('gesturechange', (event) => {
-  if (pinchBaseZoom === null) return
-  event.preventDefault()
+function updatePinchZoom (scale) {
+  if (pinchBaseZoom === null) return false
   queuePinchPreview(clamp(
-    Math.round(pinchBaseZoom * gestureScale(event)),
+    Math.round(pinchBaseZoom * scale),
     ZOOM_MIN, ZOOM_MAX, pinchBaseZoom
   ))
-}, { passive: false, capture: true })
+  return true
+}
 
-window.addEventListener('gestureend', (event) => {
-  if (pinchBaseZoom === null) return
-  event.preventDefault()
+function endPinchZoom () {
+  if (pinchBaseZoom === null) return false
   if (pinchFrame) {
     cancelAnimationFrame(pinchFrame)
     pinchFrame = 0
@@ -3088,7 +3087,32 @@ window.addEventListener('gestureend', (event) => {
   pinchBaseZoom = null
   pinchPreviewZoom = null
   applyPageZoom(finalZoom)
+  return true
+}
+
+window.addEventListener('gesturestart', (event) => {
+  if (!beginPinchZoom()) return
+  event.preventDefault()
 }, { passive: false, capture: true })
+
+window.addEventListener('gesturechange', (event) => {
+  if (!updatePinchZoom(gestureScale(event))) return
+  event.preventDefault()
+}, { passive: false, capture: true })
+
+window.addEventListener('gestureend', (event) => {
+  if (!endPinchZoom()) return
+  event.preventDefault()
+}, { passive: false, capture: true })
+
+// Windows 原生捏合：WM_GESTURE 把两指距离换算成 scale 后从这里进来。
+// 和 Mac 的 gesture* 共用同一套「预览 → 松手落定」，只是事件源不同。
+window.__wordlitePinch = (phase, scale) => {
+  if (phase === 'start') return beginPinchZoom()
+  if (phase === 'change') return updatePinchZoom(Number(scale) || 1)
+  if (phase === 'end') return endPinchZoom()
+  return false
+}
 
 // Ctrl+滚轮（Mac 上是 ⌘+滚轮）缩放页面。Mac 的双指捏合走的是系统手势、
 // 不是带修饰键的 wheel，所以不会误触——§4.4 那条「捏合不该缩放」仍然成立
@@ -3749,7 +3773,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.4'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.5'}`
 
 /* ---------------- 查找替换 ---------------- */
 

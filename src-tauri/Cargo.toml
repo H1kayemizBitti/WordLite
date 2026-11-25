@@ -1,6 +1,6 @@
 [package]
 name = "wordlite"
-version = "1.1.4"
+version = "1.1.5"
 description = "简写 WordLite - 离线、轻量的桌面写字板"
 authors = ["H1kayemizBitti"]
 edition = "2021"
@@ -31,4 +31,4 @@ block2 = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39.1"
-windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_Touch", "Win32_UI_Shell"] }
