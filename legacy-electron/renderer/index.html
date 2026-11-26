@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'self'; form-action 'self'">
+<title>未命名文档 - 简写</title>
+<link rel="stylesheet" href="style.css">
+<style id="printPageStyle"></style>
+</head>
+<body>
+
+<header id="ribbon">
+  <nav class="tabs">
+    <div class="brand" aria-hidden="true"><span class="brand-mark">简</span><span class="brand-name">简写</span></div>
+    <button class="tab active" data-tab="home">开始</button>
+    <button class="tab" data-tab="insert">插入</button>
+    <button class="tab" data-tab="layout">布局</button>
+    <button class="tab" data-tab="file">文件</button>
+    <button class="tab" data-tab="more">更多</button>
+  </nav>
+
+  <div class="panels">
+    <!-- 开始 -->
+    <div class="panel active" id="panel-home">
+      <div class="group">
+        <div class="group-title">剪贴板</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn ic" data-cmd="cut" title="剪切 (Ctrl+X)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="12" r="2"/><circle cx="11.5" cy="12" r="2"/><path d="M5.9 10.6L12 2M10.1 10.6L4 2"/></svg>剪切</button>
+            <button class="tbtn ic" data-cmd="copy" title="复制 (Ctrl+C)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="9" rx="1.5"/><path d="M10.5 5.5V3A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v7A1.5 1.5 0 0 0 4 11.5h1.5"/></svg>复制</button>
+            <button class="tbtn ic" data-cmd="paste" title="粘贴 (Ctrl+V)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 1.8h5v2.4h-5z"/><path d="M5.5 3H4a1 1 0 0 0-1 1v9.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-1.5"/></svg>粘贴</button>
+            <button class="tbtn ic" data-cmd="selectAll" title="全选 (Ctrl+A)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke-dasharray="2 1.7"/><path d="M5.5 8h5"/></svg>全选</button>
+          </div>
+          <div class="row">
+            <button class="tbtn ic" data-cmd="formatPainter" id="btnFormatPainter" title="格式刷：复制格式 Ctrl+Shift+C，应用 Ctrl+Shift+V"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="1.8" width="9.5" height="4" rx="1"/><path d="M12 3.8h1.5v3.5H8V10"/><rect x="6.8" y="10" width="2.4" height="4.5" rx=".8"/></svg>格式刷</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-title">字体</div>
+        <div class="group-body">
+          <div class="row">
+            <select id="fontFamily" class="select" title="字体"></select>
+            <select id="fontSize" class="select narrow" title="字号"></select>
+            <select id="blockStyle" class="select" title="样式">
+              <option value="paragraph">正文</option>
+              <option value="h1">标题 1</option>
+              <option value="h2">标题 2</option>
+              <option value="h3">标题 3</option>
+            </select>
+          </div>
+          <div class="row">
+            <button class="tbtn font-style" data-cmd="bold" title="加粗 (Ctrl+B)"><b>B</b></button>
+            <button class="tbtn font-style" data-cmd="italic" title="斜体 (Ctrl+I)"><i>I</i></button>
+            <button class="tbtn font-style" data-cmd="underline" title="下划线 (Ctrl+U)"><u>U</u></button>
+            <button class="tbtn font-style" data-cmd="strike" title="删除线 (Ctrl+Shift+X)"><s>S</s></button>
+            <button class="tbtn font-style" data-cmd="superscript" title="上标 (Ctrl+Shift+=)">X²</button>
+            <button class="tbtn font-style" data-cmd="subscript" title="下标 (Ctrl+=)">X₂</button>
+            <span class="divider"></span>
+            <button class="tbtn swatch" id="btnFontColor" title="字体颜色">
+              <span class="swatch-bar" id="fontColorBar">A</span>
+            </button>
+            <button class="tbtn swatch" id="btnHighlight" title="突出显示">
+              <span class="swatch-bar hl">ab</span>
+            </button>
+          </div>
+          <div class="row">
+            <label class="mini-label" for="letterSpacing">字距</label>
+            <input id="letterSpacing" class="num-input" type="number" min="-2" max="20" step="0.5" placeholder="默认" title="字符间距（磅）">
+            <button class="tbtn ic" data-cmd="clearFormat" title="清除格式（保留字体和字号）"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3h8M7.5 3L5.2 12.5M9.5 10l4 4M13.5 10l-4 4"/></svg>清除格式</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-title">段落</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn icon" data-cmd="alignLeft" title="左对齐 (Ctrl+L)">
+              <svg viewBox="0 0 16 16"><path d="M2 3h12M2 6.5h8M2 10h12M2 13.5h8"/></svg>
+            </button>
+            <button class="tbtn icon" data-cmd="alignCenter" title="居中 (Ctrl+E)">
+              <svg viewBox="0 0 16 16"><path d="M2 3h12M4 6.5h8M2 10h12M4 13.5h8"/></svg>
+            </button>
+            <button class="tbtn icon" data-cmd="alignRight" title="右对齐 (Ctrl+R)">
+              <svg viewBox="0 0 16 16"><path d="M2 3h12M6 6.5h8M2 10h12M6 13.5h8"/></svg>
+            </button>
+            <button class="tbtn icon" data-cmd="alignJustify" title="两端对齐 (Ctrl+J)">
+              <svg viewBox="0 0 16 16"><path d="M2 3h12M2 6.5h12M2 10h12M2 13.5h12"/></svg>
+            </button>
+            <select id="lineHeight" class="select narrow" title="行距">
+              <option value="">行距：默认</option>
+              <option value="1">1 倍</option>
+              <option value="1.15">1.15 倍</option>
+              <option value="1.25">1.25 倍</option>
+              <option value="1.5">1.5 倍</option>
+              <option value="1.75">1.75 倍</option>
+              <option value="2">2 倍</option>
+              <option value="2.5">2.5 倍</option>
+              <option value="3">3 倍</option>
+            </select>
+          </div>
+          <div class="row">
+            <button class="tbtn icon" data-cmd="bulletList" title="项目符号 (Ctrl+Shift+8)">
+              <svg viewBox="0 0 16 16"><circle cx="3" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><path d="M6.5 4H14M6.5 8H14M6.5 12H14"/></svg>
+            </button>
+            <button class="tbtn icon" data-cmd="orderedList" title="编号 (Ctrl+Shift+7)">
+              <svg viewBox="0 0 16 16"><path d="M2 3v5M1.5 3h2.5M1.5 5.2h2"/><path d="M2.2 11.6l-1 2.4h2.6M1.5 13.2h1.6"/><path d="M7 4h7M7 8h7M7 12h7"/></svg>
+            </button>
+            <span class="divider"></span>
+            <button class="tbtn icon" data-cmd="outdent" title="减少缩进 (Ctrl+Shift+M)">
+              <svg viewBox="0 0 16 16"><path d="M6 3l-4 5 4 5M11 8h5"/></svg>
+            </button>
+            <button class="tbtn icon" data-cmd="indent" title="增加缩进 (Ctrl+M)">
+              <svg viewBox="0 0 16 16"><path d="M10 3l4 5-4 5M1 8h5"/></svg>
+            </button>
+          </div>
+          <div class="row">
+            <label class="mini-label" for="spacingBefore">段前</label>
+            <input id="spacingBefore" class="num-input" type="number" min="0" max="200" step="1" placeholder="0" title="段前间距（磅）">
+            <label class="mini-label" for="spacingAfter">段后</label>
+            <input id="spacingAfter" class="num-input" type="number" min="0" max="200" step="1" placeholder="0" title="段后间距（磅）">
+            <span class="unit">磅</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 插入 -->
+    <div class="panel" id="panel-insert">
+      <div class="group">
+        <div class="group-title">内容</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn ic" data-cmd="insertTable" title="插入 3 行 3 列表格"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 6.2h13M1.5 9.8h13M5.8 2.5v11M10.2 2.5v11"/></svg>表格 3×3</button>
+            <button class="tbtn ic" data-cmd="insertImage" title="插入本地图片"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><circle cx="5.5" cy="6" r="1.2"/><path d="M1.5 12l4-3.5 3 2.5 2-1.5 4 3"/></svg>图片</button>
+            <button class="tbtn ic" data-cmd="insertPageBreak" title="插入手动分页符 (Ctrl+Enter)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 1.5v4h9v-4M3.5 14.5v-4h9v4M1.5 8h2M5.5 8h2M9.5 8h2M13 8h1.5"/></svg>分页符</button>
+            <button class="tbtn ic" data-cmd="insertDate" title="插入当前日期"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="3" width="13" height="11.5" rx="1"/><path d="M1.5 6.5h13M5 1.5v3M11 1.5v3M4.5 9.5h2M9.5 9.5h2M4.5 12h2"/></svg>日期</button>
+          </div>
+        </div>
+      </div>
+      <div class="group">
+        <div class="group-title">图片</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn ic" data-cmd="editImage" data-image-control title="打开图片设置：大小、对齐、环绕、裁剪、更换和删除"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5V12h10.5M1.5 4H12v10.5"/></svg>图片设置</button>
+          </div>
+        </div>
+      </div>
+      <div class="group">
+        <div class="group-title">表格</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn" data-cmd="addRowAfter" data-table-control title="在下方插入行">加行</button>
+            <button class="tbtn" data-cmd="addColumnAfter" data-table-control title="在右侧插入列">加列</button>
+            <button class="tbtn" data-cmd="deleteRow" data-table-control title="删除当前行">删行</button>
+            <button class="tbtn" data-cmd="deleteColumn" data-table-control title="删除当前列">删列</button>
+            <button class="tbtn" data-cmd="deleteTable" data-table-control title="删除整个表格">删表</button>
+          </div>
+          <div class="row">
+            <button class="tbtn" data-cmd="mergeCells" data-table-control title="合并选中的单元格">合并单元格</button>
+            <button class="tbtn" data-cmd="splitCell" data-table-control title="拆分当前单元格">拆分单元格</button>
+            <label class="mini-label" for="tableBorderSize">边框</label>
+            <select id="tableBorderSize" class="select narrow" title="表格边框宽度（磅）">
+              <option value="0">无</option>
+              <option value="0.25">0.25</option>
+              <option value="0.5">0.5</option>
+              <option value="1">1</option>
+              <option value="1.5">1.5</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+            <input id="tableBorderColor" class="color-input" type="color" value="#bfbfbf" title="表格边框颜色">
+          </div>
+          <div class="row">
+            <label class="mini-label" for="cellShading">底色</label>
+            <input id="cellShading" class="color-input" type="color" value="#ffffff" title="单元格底色">
+            <button class="tbtn" id="btnClearCellShading" title="清除单元格底色">无填充</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 布局 -->
+    <div class="panel" id="panel-layout">
+      <div class="group">
+        <div class="group-title">页面设置</div>
+        <div class="group-body">
+          <div class="row layout-row">
+            <label for="pageSize">纸张</label>
+            <select id="pageSize" class="select" title="纸张尺寸">
+              <option value="a4">A4</option>
+              <option value="a5">A5</option>
+              <option value="letter">Letter</option>
+            </select>
+            <label for="pageOrientation">方向</label>
+            <select id="pageOrientation" class="select" title="纸张方向">
+              <option value="portrait">纵向</option>
+              <option value="landscape">横向</option>
+            </select>
+            <label for="pageMargin">页边距</label>
+            <select id="pageMargin" class="select" title="页边距预设">
+              <option value="normal">普通</option>
+              <option value="narrow">窄</option>
+              <option value="wide">宽</option>
+              <option value="custom">自定义</option>
+            </select>
+            <label for="pageBackground">背景</label>
+            <input id="pageBackground" class="color-input" type="color" value="#ffffff" title="页面背景色">
+          </div>
+          <div class="row layout-row">
+            <span class="mini-label">自定义边距</span>
+            <label class="mini-label" for="marginTop">上</label>
+            <input id="marginTop" class="num-input" data-margin-side="top" type="number" min="0" max="10" step="0.1" title="上边距（厘米）">
+            <label class="mini-label" for="marginRight">右</label>
+            <input id="marginRight" class="num-input" data-margin-side="right" type="number" min="0" max="10" step="0.1" title="右边距（厘米）">
+            <label class="mini-label" for="marginBottom">下</label>
+            <input id="marginBottom" class="num-input" data-margin-side="bottom" type="number" min="0" max="10" step="0.1" title="下边距（厘米）">
+            <label class="mini-label" for="marginLeft">左</label>
+            <input id="marginLeft" class="num-input" data-margin-side="left" type="number" min="0" max="10" step="0.1" title="左边距（厘米）">
+            <span class="unit">厘米</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 文件 -->
+    <div class="panel" id="panel-file">
+      <div class="group">
+        <div class="group-title">文档</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn ic" id="btnNew" title="新建 (Ctrl+N)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4z"/><path d="M9.5 1.5V5H13M8.5 8v4M6.5 10h4"/></svg>新建</button>
+            <button class="tbtn ic" id="btnOpen" title="打开 (Ctrl+O)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>打开</button>
+            <button class="tbtn ic" id="btnSave" title="保存 (Ctrl+S)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h9l2 2v9h-11z"/><path d="M5 2.5V6h5V2.5M5 13.5v-4h6v4"/></svg>保存</button>
+            <button class="tbtn ic" id="btnSaveAs" title="另存为 (Ctrl+Shift+S)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 7.5v-3l-2-2h-9v11H8"/><path d="M5 2.5v3h5v-3"/><path d="M10 14.5l.5-2 3.3-3.3 1.5 1.5-3.3 3.3z"/></svg>另存为</button>
+          </div>
+        </div>
+      </div>
+      <div class="group">
+        <div class="group-title">打印</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn ic" id="btnPrint" title="打印 / 打印预览 (Ctrl+P)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6V2h7v4"/><rect x="1.5" y="6" width="13" height="6" rx="1"/><path d="M4.5 10h7v4.5h-7z"/></svg>打印 / 预览</button>
+            <button class="tbtn ic" id="btnPrintPreview" title="打印预览 (Ctrl+P)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 14.5H3v-13h6.5L12 4v3"/><circle cx="10.5" cy="10.5" r="2.5"/><path d="M12.3 12.3l2.2 2.2"/></svg>打印预览</button>
+            <button class="tbtn ic" id="btnExportPdf" title="导出为 PDF"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4z"/><path d="M9.5 1.5V5H13M8.5 7v5M6.5 10l2 2 2-2"/></svg>导出 PDF</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 更多 -->
+    <div class="panel" id="panel-more">
+      <div class="group">
+        <div class="group-title">应用</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn ic" id="btnOpenSettings" title="修改默认字体、页面和自动保存"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h9M14 12h0"/><circle cx="10.5" cy="4" r="1.5"/><circle cx="5.5" cy="8" r="1.5"/><circle cx="12.5" cy="12" r="1.5"/></svg>设置</button>
+            <button class="tbtn ic" id="btnOpenHelp" title="查看功能和快捷键 (F1)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M6.2 6.2a1.9 1.9 0 1 1 2.6 1.7c-.5.3-.8.7-.8 1.3v.3"/><path d="M8 11.6v.1"/></svg>帮助</button>
+          </div>
+        </div>
+      </div>
+      <div class="group recent-group">
+        <div class="group-title recent-title">
+          <span>最近打开</span>
+          <button class="link-btn" id="btnClearRecent" type="button">清空</button>
+        </div>
+        <div class="group-body">
+          <div class="recent-list" id="recentList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 颜色弹出层 -->
+  <div class="popover" id="colorPopover" hidden>
+    <div class="popover-title">字体颜色</div>
+    <div class="palette" id="colorPalette"></div>
+  </div>
+  <div class="popover" id="highlightPopover" hidden>
+    <div class="popover-title">突出显示</div>
+    <div class="palette" id="highlightPalette"></div>
+  </div>
+</header>
+
+<main id="workspace">
+  <div class="paper">
+    <div id="editor"></div>
+  </div>
+</main>
+
+<footer id="statusbar">
+  <span id="wordCount">字数 0</span>
+  <span id="fileStatus"></span>
+  <span class="status-badge" title="所有文件只在本机读写，不联网">离线 · 本地保存</span>
+</footer>
+
+<!-- 图片设置 -->
+<dialog class="dialog" id="imageDialog">
+  <div class="dialog-head">
+    <h2>图片设置</h2>
+    <button class="dialog-close" type="button" data-close-dialog="imageDialog" aria-label="关闭">×</button>
+  </div>
+  <div class="dialog-body">
+    <div class="form-grid">
+      <label for="imageWidth">宽度（像素）</label>
+      <input id="imageWidth" class="text-input" type="number" min="8" max="5000" step="1">
+      <label for="imageHeight">高度（像素）</label>
+      <div class="inline-field">
+        <input id="imageHeight" class="text-input" type="number" min="8" max="5000" step="1">
+        <label class="check-label"><input id="imageLockRatio" type="checkbox" checked> 锁定比例</label>
+      </div>
+      <label for="imageAlign">对齐</label>
+      <select id="imageAlign" class="select wide-select">
+        <option value="left">左对齐</option>
+        <option value="center">居中</option>
+        <option value="right">右对齐</option>
+      </select>
+      <label for="imageWrap">文字环绕</label>
+      <select id="imageWrap" class="select wide-select">
+        <option value="none">嵌入型（不环绕）</option>
+        <option value="left">四周环绕：图片在左</option>
+        <option value="right">四周环绕：图片在右</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <div class="field-title">裁剪（百分比，0 表示不裁剪）</div>
+      <div class="crop-grid">
+        <label for="cropTop">上 <input id="cropTop" class="num-input" type="number" min="0" max="95" step="1"></label>
+        <label for="cropRight">右 <input id="cropRight" class="num-input" type="number" min="0" max="95" step="1"></label>
+        <label for="cropBottom">下 <input id="cropBottom" class="num-input" type="number" min="0" max="95" step="1"></label>
+        <label for="cropLeft">左 <input id="cropLeft" class="num-input" type="number" min="0" max="95" step="1"></label>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-foot">
+    <button class="tbtn danger" id="btnDeleteImage" type="button">删除图片</button>
+    <button class="tbtn" id="btnReplaceImage" type="button">更换图片</button>
+    <span class="spacer"></span>
+    <button class="tbtn" id="btnCancelImage" type="button">取消</button>
+    <button class="tbtn primary" id="btnApplyImage" type="button">应用</button>
+  </div>
+</dialog>
+
+<!-- 设置 -->
+<dialog class="dialog" id="settingsDialog">
+  <div class="dialog-head">
+    <h2>设置</h2>
+    <button class="dialog-close" type="button" data-close-dialog="settingsDialog" aria-label="关闭">×</button>
+  </div>
+  <form id="settingsForm">
+    <div class="dialog-body">
+      <p class="dialog-note">这些默认值用于新建文档和未单独设置格式的文字；已保存文档中的显式格式不会被改写。</p>
+      <div class="form-grid">
+        <label for="settingsFont">默认字体</label>
+        <select id="settingsFont" class="select wide-select"></select>
+        <label for="settingsFontSize">默认字号</label>
+        <select id="settingsFontSize" class="select wide-select"></select>
+        <label for="settingsLineHeight">默认行距</label>
+        <select id="settingsLineHeight" class="select wide-select">
+          <option value="1">1 倍</option>
+          <option value="1.15">1.15 倍</option>
+          <option value="1.25">1.25 倍</option>
+          <option value="1.5">1.5 倍</option>
+          <option value="1.6">1.6 倍</option>
+          <option value="1.75">1.75 倍</option>
+          <option value="2">2 倍</option>
+          <option value="2.5">2.5 倍</option>
+          <option value="3">3 倍</option>
+        </select>
+        <label for="settingsPageSize">默认纸张</label>
+        <select id="settingsPageSize" class="select wide-select">
+          <option value="a4">A4</option>
+          <option value="a5">A5</option>
+          <option value="letter">Letter</option>
+        </select>
+        <label for="settingsPageOrientation">默认方向</label>
+        <select id="settingsPageOrientation" class="select wide-select">
+          <option value="portrait">纵向</option>
+          <option value="landscape">横向</option>
+        </select>
+        <label for="settingsPageMargin">默认页边距</label>
+        <select id="settingsPageMargin" class="select wide-select">
+          <option value="normal">普通</option>
+          <option value="narrow">窄</option>
+          <option value="wide">宽</option>
+        </select>
+        <label for="settingsAutosave">自动保存间隔</label>
+        <div class="inline-field">
+          <input id="settingsAutosave" class="text-input short-input" type="number" min="0" max="60" step="1">
+          <span class="unit">分钟（0 = 关闭）</span>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="tbtn" id="btnResetSettings" type="button">恢复默认</button>
+      <span class="spacer"></span>
+      <button class="tbtn" id="btnCancelSettings" type="button">取消</button>
+      <button class="tbtn primary" type="submit">保存设置</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 帮助 -->
+<dialog class="dialog help-dialog" id="helpDialog">
+  <div class="dialog-head">
+    <h2>帮助与快捷键</h2>
+    <button class="dialog-close" type="button" data-close-dialog="helpDialog" aria-label="关闭">×</button>
+  </div>
+  <div class="dialog-body">
+    <p class="dialog-note">简写是完全离线的本地写字板。所有文件只经过系统文件对话框读写，不联网。</p>
+    <h3>文件</h3>
+    <div class="shortcut-grid">
+      <span>新建</span><kbd>Ctrl+N</kbd>
+      <span>打开</span><kbd>Ctrl+O</kbd>
+      <span>保存</span><kbd>Ctrl+S</kbd>
+      <span>另存为</span><kbd>Ctrl+Shift+S</kbd>
+      <span>打印 / 预览</span><kbd>Ctrl+P</kbd>
+      <span>帮助</span><kbd>F1</kbd>
+    </div>
+    <h3>文字格式</h3>
+    <div class="shortcut-grid">
+      <span>加粗 / 斜体 / 下划线</span><kbd>Ctrl+B / I / U</kbd>
+      <span>删除线</span><kbd>Ctrl+Shift+X</kbd>
+      <span>上标 / 下标</span><kbd>Ctrl+Shift+= / Ctrl+=</kbd>
+      <span>增大 / 减小字号</span><kbd>Ctrl+Shift+&gt; / &lt;</kbd>
+      <span>格式刷：复制 / 应用</span><kbd>Ctrl+Shift+C / V</kbd>
+    </div>
+    <h3>段落与表格</h3>
+    <div class="shortcut-grid">
+      <span>标题 1/2/3 / 正文</span><kbd>Ctrl+1 / 2 / 3 / 0</kbd>
+      <span>左 / 中 / 右 / 两端对齐</span><kbd>Ctrl+L / E / R / J</kbd>
+      <span>项目符号 / 编号</span><kbd>Ctrl+Shift+8 / 7</kbd>
+      <span>增减缩进 / 减少缩进</span><kbd>Ctrl+M / Ctrl+Shift+M</kbd>
+      <span>插入分页符</span><kbd>Ctrl+Enter</kbd>
+    </div>
+    <p class="dialog-note">图片：选中后双击可打开“图片设置”，支持精确宽高、对齐、文字环绕、裁剪和更换。表格：拖动列边线调整列宽，选中多个单元格后可合并，插入标签页可设置边框和底色。</p>
+    <p class="dialog-note" id="helpVersion"></p>
+  </div>
+  <div class="dialog-foot">
+    <span class="spacer"></span>
+    <button class="tbtn primary" id="btnCloseHelp" type="button">关闭</button>
+  </div>
+</dialog>
+
+<!-- 打印预览 -->
+<dialog class="dialog preview-dialog" id="printPreviewDialog">
+  <div class="dialog-head">
+    <h2>打印预览</h2>
+    <button class="dialog-close" type="button" data-close-dialog="printPreviewDialog" aria-label="关闭">×</button>
+  </div>
+  <div class="preview-toolbar">
+    <label for="printPageRanges">页码范围</label>
+    <input id="printPageRanges" class="text-input" type="text" placeholder="全部，例如 1-3,5">
+    <label for="printCopies">份数</label>
+    <input id="printCopies" class="text-input short-input" type="number" min="1" max="99" step="1" value="1">
+    <span id="printRangeError" class="field-error"></span>
+  </div>
+  <div class="preview-scroll" id="previewScroll">
+    <div class="preview-pages" id="previewPages"></div>
+  </div>
+  <div class="preview-meta" id="previewMeta"></div>
+  <div class="dialog-foot">
+    <span class="dialog-note">预览按分页符分页，自动换行位置以实际打印为准。</span>
+    <span class="spacer"></span>
+    <button class="tbtn" id="btnCancelPrint" type="button">取消</button>
+    <button class="tbtn primary" id="btnDoPrint" type="button">打印</button>
+  </div>
+</dialog>
+
+<script src="bundle.js"></script>
+</body>
+</html>

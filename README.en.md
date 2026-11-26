@@ -43,6 +43,8 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 - 🪟 **Multi-window** — dropping a file or using "Open with" opens a separate window for side-by-side comparison; in-app opens stay in the current window
 - 💾 **Never lose a draft** — periodic autosave with crash recovery
 
+> The old Electron source is archived in [`legacy-electron/`](legacy-electron/) for reference only; the maintained version is the Tauri 2 app at the repository root.
+
 ## Download
 
 ### Windows 10 / 11
