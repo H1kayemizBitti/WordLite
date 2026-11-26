@@ -18,8 +18,8 @@ const REQUIRED_BOOL = [
   'paragraphDialog', 'paragraphExactLine', 'paragraphSpacing',
   // 默认字体/字号标签、打印关闭保护命令
   'defaultFormatLabels', 'printingGuard',
-  // 工具栏单行、右下角详细工具侧板（宽窗停靠时正文不被盖住）
-  'ribbonSingleRow', 'ribbonDetail', 'ribbonDetailDocked'
+  // 工具栏单行、右下角详细工具侧板（宽窗停靠不压纸，窄窗浮动卡片）
+  'ribbonSingleRow', 'ribbonDetail', 'ribbonDetailLayout'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',

@@ -1994,29 +1994,47 @@ pub fn run() {
                                 const workspaceRect = workspaceEl.getBoundingClientRect();
                                 const paperRect = paperEl.getBoundingClientRect();
                                 const workspaceMargin = Number.parseFloat(getComputedStyle(workspaceEl).marginRight);
+                                const detailRadius = Number.parseFloat(getComputedStyle(detailSheet).borderRadius);
+                                const isDocked = document.body.classList.contains('tool-detail-docked');
+                                const isFloating = document.body.classList.contains('tool-detail-floating');
+                                // GitHub runner 的屏幕只有 1024 宽，Tauri 的 1160 窗口会被裁到 1024；
+                                // 这时放不下 A4 + 340 侧板，浮动卡片才是正确布局，不能硬要求停靠。
+                                const canDock = window.innerWidth >= paperRect.width + detailRect.width;
                                 results.ribbonInfo = {{
                                     innerWidth: window.innerWidth,
                                     paperWidth: paperRect.width,
                                     panelWidth: detailRect.width,
-                                    docked: document.body.classList.contains('tool-detail-docked'),
+                                    canDock,
+                                    docked: isDocked,
+                                    floating: isFloating,
                                     workspaceMargin,
                                     detailLeft: detailRect.left,
+                                    detailRight: detailRect.right,
                                     workspaceRight: workspaceRect.right,
                                     paperRight: paperRect.right,
                                     ribbonBottom: ribbonRect.bottom,
-                                    detailTop: detailRect.top
+                                    detailTop: detailRect.top,
+                                    detailRadius
                                 }};
                                 results.ribbonDetail = !detailSheet.hidden &&
                                     detailRect.top >= ribbonRect.bottom - 1;
-                                results.ribbonDetailDocked = document.body.classList.contains('tool-detail-docked') &&
-                                    workspaceMargin > 100 &&
-                                    detailRect.left >= workspaceRect.right - 1 &&
-                                    paperRect.right <= detailRect.left + 1;
+                                results.ribbonDetailDocked = isDocked;
+                                if (canDock) {{
+                                    results.ribbonDetailLayout = isDocked && workspaceMargin > 100 &&
+                                        detailRect.left >= workspaceRect.right - 1 &&
+                                        paperRect.right <= detailRect.left + 1;
+                                }} else {{
+                                    results.ribbonDetailLayout = !isDocked && isFloating &&
+                                        detailRect.top >= ribbonRect.bottom + 6 &&
+                                        detailRect.right <= window.innerWidth - 15 &&
+                                        detailRect.left > 0 && detailRadius >= 10;
+                                }}
                                 document.querySelector('#btnToolDetailClose').click();
                             }} catch (ribbonError) {{
                                 results.ribbonSingleRow = false;
                                 results.ribbonDetail = false;
                                 results.ribbonDetailDocked = false;
+                                results.ribbonDetailLayout = false;
                                 results.ribbonError = String(ribbonError);
                             }}
                             try {{
