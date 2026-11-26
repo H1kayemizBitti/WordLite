@@ -1791,6 +1791,53 @@ pub fn run() {
                             }} catch (pinchError) {{
                                 results.pagePinchError = String(pinchError);
                             }}
+                            // 屏幕分页：长文自动多页、页缝无字、模型不变、双击收放
+                            try {{
+                                const pageEditor = editorEl.editor;
+                                const pageSample = '分页自测的一段话，'.repeat(400);
+                                pageEditor.commands.setContent('<p>' + pageSample + '</p>');
+                                const readPageState = () => window.__wordlitePagination.state();
+                                let pageState = readPageState();
+                                for (let i = 0; i < 30 && !(pageState.sheetCount > 1 && pageState.gapCount === pageState.sheetCount - 1); i++) {{
+                                    await new Promise((resolve) => setTimeout(resolve, 100));
+                                    pageState = readPageState();
+                                }}
+                                const pageRects = Array.from(document.querySelectorAll('.page-sheet')).map((el) => el.getBoundingClientRect());
+                                const pageGaps = pageRects.slice(1).map((rect, index) => ({{ top: pageRects[index].bottom, bottom: rect.top }}));
+                                const pageRange = document.createRange();
+                                const pageWalker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT);
+                                let pageInGap = 0;
+                                let pageNode;
+                                while ((pageNode = pageWalker.nextNode())) {{
+                                    if (!pageNode.nodeValue) continue;
+                                    pageRange.selectNodeContents(pageNode);
+                                    for (const rect of pageRange.getClientRects()) {{
+                                        if (rect.width > 0.5 && pageGaps.some((gap) => Math.min(rect.bottom, gap.bottom) - Math.max(rect.top, gap.top) > 1)) pageInGap += 1;
+                                    }}
+                                }}
+                                results.pagePagination = pageRects.length > 1 &&
+                                    pageState.sheetCount === pageRects.length &&
+                                    pageState.gapCount === pageRects.length - 1 &&
+                                    pageState.gapBands === pageRects.length - 1 &&
+                                    editorEl.closest('.paper').classList.contains('paginated');
+                                results.pagePaginationNoGapText = pageInGap === 0;
+                                results.pagePaginationModel = pageEditor.state.doc.textContent.length === pageSample.length &&
+                                    !JSON.stringify(pageEditor.getJSON()).includes('page-gap-widget');
+                                window.__wordlitePagination.toggleGap();
+                                await new Promise((resolve) => setTimeout(resolve, 500));
+                                const foldedState = window.__wordlitePagination.state();
+                                const foldedRects = Array.from(document.querySelectorAll('.page-sheet')).map((el) => el.getBoundingClientRect());
+                                const foldedGap = foldedRects.length > 1 ? foldedRects[1].top - foldedRects[0].bottom : 999;
+                                window.__wordlitePagination.toggleGap();
+                                await new Promise((resolve) => setTimeout(resolve, 500));
+                                const restoredState = window.__wordlitePagination.state();
+                                const restoredRects = Array.from(document.querySelectorAll('.page-sheet')).map((el) => el.getBoundingClientRect());
+                                const restoredGap = restoredRects.length > 1 ? restoredRects[1].top - restoredRects[0].bottom : 0;
+                                results.pagePaginationCollapse = foldedState.collapsed === true && Math.abs(foldedGap) < 1.5;
+                                results.pagePaginationRestore = restoredState.collapsed === false && restoredGap > 10;
+                            }} catch (pageError) {{
+                                results.pagePaginationError = String(pageError);
+                            }}
                             try {{
                                 await withTimeout(window.__TAURI__.core.invoke('open_external', {{ path: {probe} }}), 5000);
                                 // 立刻重复一次，验证 1.5 秒内的同路径去重（不应再开窗口）

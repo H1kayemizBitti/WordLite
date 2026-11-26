@@ -33,6 +33,7 @@ import {
   StrikeWithShortcut
 } from './extensions.js'
 import { docxBase64ToJSON, jsonToDocxBase64 } from './docx.js'
+import { Pagination, createPaginator, PAGE_GAP_DEFAULT } from './pagination.js'
 
 /* ---------------- 常量 ---------------- */
 
@@ -108,6 +109,7 @@ let statusTimer = null
 let autosaveTimer = null
 let formatPainter = null
 let recentFiles = []
+let paginator = null
 
 const clamp = (value, min, max, fallback = min) => {
   const n = Number(value)
@@ -251,7 +253,8 @@ const editorExtensions = [
   Placeholder.configure({ placeholder: '开始输入…' }),
   PlainTextInput,
   FindHighlight,
-  SelectionImageHighlight
+  SelectionImageHighlight,
+  Pagination
 ]
 
 const editor = new Editor({
@@ -1672,6 +1675,8 @@ function closeImageEditorUI () {
   editor.setEditable(true, false)
   imageEdit = null
   scheduleAutoSave()
+  // 图片编辑期间暂停了分页重排（拖拽时重排会打架），收工后补一次
+  paginator?.schedule(80)
 }
 
 function closeImageEditor () {
@@ -2974,6 +2979,8 @@ function applyPageSetup () {
     `@page { size: ${dimensions.width}cm ${dimensions.height}cm; margin: ${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm; ` +
     '@top-left { content: ""; } @top-center { content: ""; } @top-right { content: ""; } ' +
     '@bottom-left { content: ""; } @bottom-center { content: ""; } @bottom-right { content: ""; } }'
+  // 纸张尺寸/边距变了，所有页缝位置都要重算
+  paginator?.force(0)
 }
 
 function setPageSetup (patch) {
@@ -3235,6 +3242,111 @@ document.querySelector('#btnZoomIn').addEventListener('click', () => stepPageZoo
 document.querySelector('#btnZoomOut').addEventListener('click', () => stepPageZoom(-1))
 document.querySelector('#btnZoomReset').addEventListener('click', () => applyPageZoom(100, zoomAnchor()))
 
+/* ---------------- 屏幕分页 ---------------- */
+
+// 页缝宽度按样张定 16px；双击页缝收起空白后变成 0（Word 的“隐藏空白”）
+const PAGE_GAP_KEY = 'wordlite.pageGapCollapsed.v1'
+let pageGapCollapsed = storageRead(PAGE_GAP_KEY, false) === true
+
+function paginationGeometry () {
+  const dimensions = pageDimensions()
+  const margins = currentMargins()
+  const cm = 96 / 2.54
+  return {
+    pageWidth: dimensions.width * cm,
+    pageHeight: dimensions.height * cm,
+    marginTop: margins.top * cm,
+    marginRight: margins.right * cm,
+    marginBottom: margins.bottom * cm,
+    marginLeft: margins.left * cm,
+    contentHeight: Math.max(16, (dimensions.height - margins.top - margins.bottom) * cm),
+    background: pageSetup.background
+  }
+}
+
+paginator = createPaginator({
+  editor,
+  getGeometry: paginationGeometry,
+  getGap: () => pageGapCollapsed ? 0 : PAGE_GAP_DEFAULT,
+  getScale: () => renderedZoom / 100,
+  shouldDefer: () => !!imageEdit || imageViewer.open || inCropMode(),
+  onPageUpdate: ({ pageCount }) => {
+    const paper = document.querySelector('.paper')
+    paper?.classList.toggle('gaps-collapsed', pageGapCollapsed)
+    const status = document.querySelector('#pageStatus')
+    if (status) status.textContent = `共 ${pageCount} 页`
+  }
+})
+
+function togglePageGap () {
+  pageGapCollapsed = !pageGapCollapsed
+  storageWrite(PAGE_GAP_KEY, pageGapCollapsed)
+  document.querySelector('.paper')?.classList.toggle('gaps-collapsed', pageGapCollapsed)
+  paginator.force(0)
+}
+
+// 页缝命中测试：用纸面未缩放坐标和分页引擎记下的页缝带比对
+function pageGapHit (event) {
+  if (document.querySelector('dialog[open]')) return false
+  const paper = document.querySelector('.paper')
+  if (!paper) return false
+  const rect = paper.getBoundingClientRect()
+  const scale = renderedZoom / 100 || 1
+  if (event.clientX < rect.left || event.clientX > rect.right) return false
+  const y = (event.clientY - rect.top) / scale
+  return paginator.gapBands().some((band) => y >= band.top - 8 && y <= band.bottom + 8)
+}
+
+// 两张纸之间那条窄缝上按下时不要挪光标/开始拖选；纸边距仍然可以拖选
+function pageSheetGapHit (event) {
+  if (document.querySelector('dialog[open]')) return false
+  const sheets = Array.from(document.querySelectorAll('.page-sheet'))
+  for (let i = 1; i < sheets.length; i += 1) {
+    const above = sheets[i - 1].getBoundingClientRect()
+    const below = sheets[i].getBoundingClientRect()
+    if (event.clientX >= above.left && event.clientX <= above.right &&
+        event.clientY >= above.bottom - 4 && event.clientY <= below.top + 4) {
+      return true
+    }
+  }
+  return false
+}
+
+workspaceEl.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || !pageSheetGapHit(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+}, true)
+
+// 双击页缝收起/展开：Word 的隐藏空白。只认落在页缝带里的双击，
+// 正文里的双击（选词）原样放过。
+workspaceEl.addEventListener('dblclick', (event) => {
+  if (!pageGapHit(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  togglePageGap()
+}, true)
+
+// 图片解码完才真正有高度；字体换了行高也会变。这两类变化不一定伴随文档更新
+editor.view.dom.addEventListener('load', (event) => {
+  if (event.target?.tagName === 'IMG') paginator.force(80)
+}, true)
+if (document.fonts?.ready) document.fonts.ready.then(() => paginator.force(0))
+
+// 测试和验收用的入口：手动重排、读当前页数/页缝
+window.__wordlitePagination = {
+  run: () => paginator.runNow(),
+  toggleGap: () => togglePageGap(),
+  debug: () => paginator.debug(),
+  state: () => ({
+    pageCount: paginator.getPageCount(),
+    gapCount: document.querySelectorAll('.page-gap-widget').length,
+    sheetCount: document.querySelectorAll('.page-sheet').length,
+    gapBands: paginator.gapBands().length,
+    collapsed: pageGapCollapsed
+  })
+}
+
 document.querySelector('#pageSize').addEventListener('change', (e) => setPageSetup({ size: e.target.value }))
 document.querySelector('#pageOrientation').addEventListener('change', (e) => setPageSetup({ orientation: e.target.value }))
 document.querySelector('#pageBackground').addEventListener('change', (e) => setPageSetup({ background: e.target.value }))
@@ -3284,6 +3396,7 @@ function handleEditorUpdate () {
   syncToolbar()
   if (!loadingDocument) setDirty(true)
   if (!findBar.hidden) scheduleFindRefresh()
+  paginator?.schedule()
 }
 
 function setEditorJSON (json) {
@@ -3309,6 +3422,7 @@ function setEditorJSON (json) {
   loadingDocument = false
   updateStatusBar()
   syncToolbar()
+  paginator?.force(0)
 }
 
 function fileNameFromPath (filePath) {
@@ -3844,6 +3958,7 @@ document.querySelector('#settingsForm').addEventListener('submit', (event) => {
   applyDefaultStyles()
   scheduleAutoSave()
   settingsDialog.close()
+  paginator?.force(0)
   showStatus('设置已保存；默认字体/页面对新文档生效')
 })
 
@@ -3871,7 +3986,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.9'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.2.0'}`
 
 /* ---------------- 查找替换 ---------------- */
 

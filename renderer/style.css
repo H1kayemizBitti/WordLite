@@ -536,6 +536,86 @@ body.file-drag-over::after {
   -webkit-print-color-adjust: exact;
 }
 
+/* ---------- 屏幕分页 ---------- */
+
+/* 分页时 .paper 只是一根透明的正文柱子，白纸由 .page-layer 里一张张 A4 画出来 */
+.paper.paginated {
+  background: transparent;
+  box-shadow: none;
+  z-index: 0;
+}
+
+.page-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.paper.paginated #editor {
+  position: relative;
+  z-index: 1;
+}
+
+.page-sheet {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  background: var(--paper);
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 1px rgba(16, 24, 40, 0.05),
+    0 2px 4px rgba(16, 24, 40, 0.06),
+    0 12px 32px rgba(16, 24, 40, 0.1);
+}
+
+.page-sheet-number {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.45cm;
+  text-align: center;
+  font-family: -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-size: 11px;
+  line-height: 1;
+  color: #9aa0a6;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* 收起空白：纸挨着纸，只留一条细分隔线 */
+.paper.gaps-collapsed .page-sheet {
+  box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.06);
+}
+
+.paper.gaps-collapsed .page-sheet + .page-sheet::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+/* 跨页间隔：不进文档的块级 widget，只负责把后面的内容顶到下一页 */
+.ProseMirror .page-gap-widget {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 0;
+  line-height: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ---------- 状态栏 ---------- */
 
 #statusbar {
@@ -1367,6 +1447,9 @@ body.file-drag-over::after {
     border: 0;
   }
   .ProseMirror .page-break span { display: none; }
+  /* 屏幕分页的纸层和间隔 widget 不打印；打印走浏览器自己的分页 */
+  .page-layer,
+  .ProseMirror .page-gap-widget { display: none !important; }
   /* 打印时不要画编辑光标、选区高亮和 gapcursor：WKWebView 会把它们一起画进 PDF */
   .ProseMirror { caret-color: transparent !important; }
   .ProseMirror ::selection { background: transparent !important; }

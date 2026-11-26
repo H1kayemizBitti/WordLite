@@ -8,7 +8,10 @@ const REQUIRED_BOOL = [
   // 页面缩放：控件在、缩放生效、排版像素不变、能回 100%
   'pageZoomControls', 'pageZoomShrinks', 'pageZoomKeepsLayout', 'pageZoomReset',
   // 触控板捏合：预览不写存储、松手落定、有弹窗时忽略、WebView2 合成 wheel 能驱动缩放
-  'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog', 'pagePinchWheel'
+  'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog', 'pagePinchWheel',
+  // 屏幕分页：多页、页缝无字、不改文档、双击收起/恢复
+  'pagePagination', 'pagePaginationNoGapText', 'pagePaginationModel',
+  'pagePaginationCollapse', 'pagePaginationRestore'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',
