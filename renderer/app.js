@@ -5044,7 +5044,20 @@ function buildExplicitPrintPages () {
 
   root.replaceChildren(fragment)
 
-  // 克隆正文在打印环境里可能和屏幕差零点几像素（外边距塌陷等），
+  // #printRoot 平时 display:none，量不到克隆正文的真实位置。
+  // 同一帧里临时移到屏幕外显示，量完立刻收回，不会有可见闪动。
+  const measureStyle = {
+    display: root.style.display,
+    position: root.style.position,
+    left: root.style.left,
+    top: root.style.top
+  }
+  root.style.display = 'block'
+  root.style.position = 'absolute'
+  root.style.left = '-200000px'
+  root.style.top = '0'
+
+  // 克隆正文在屏幕媒体里可能和原正文差零点几像素（外边距塌陷等），
   // 用第一行校准一次，所有页一起平移，保证正文和页眉页脚对得上
   const first = contents[0]
   const liveFirst = firstTextTop(editorDom)
@@ -5059,6 +5072,11 @@ function buildExplicitPrintPages () {
       }
     }
   }
+
+  root.style.display = measureStyle.display
+  root.style.position = measureStyle.position
+  root.style.left = measureStyle.left
+  root.style.top = measureStyle.top
 
   // 显式纸张自己带页边距，@page 只留纸张尺寸和 0 边距，不能再画页边距盒子
   styleEl.textContent =

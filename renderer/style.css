@@ -1657,8 +1657,40 @@ html.cross-page-selection { --wl-selection-color: rgba(0, 0, 0, 0); }
 
 /* ---------- 打印 ---------- */
 
-/* Mac 导出 PDF 用的显式纸张层：屏幕上不占位，只在显式打印模式里显示 */
+/* Mac 导出 PDF 用的显式纸张层：屏幕上不占位，只在显式打印模式里显示。
+   纸张内部布局放在全局，导出的自测/校准要能在屏幕媒体下量到真实尺寸。 */
 #printRoot { display: none; }
+
+#printRoot .print-page {
+  position: relative;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  box-sizing: border-box;
+}
+
+#printRoot .print-furniture {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+#printRoot .print-page-body {
+  position: absolute;
+  overflow: hidden;
+}
+
+#printRoot .print-page-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
 
 @media print {
   dialog, #contextMenu { display: none !important; }
@@ -1758,12 +1790,6 @@ html.cross-page-selection { --wl-selection-color: rgba(0, 0, 0, 0); }
   body.print-explicit #printRoot { display: block !important; }
 
   #printRoot .print-page {
-    position: relative;
-    overflow: hidden;
-    margin: 0;
-    padding: 0;
-    background: var(--paper);
-    box-sizing: border-box;
     break-after: page;
     page-break-after: always;
     break-inside: avoid;
@@ -1772,25 +1798,6 @@ html.cross-page-selection { --wl-selection-color: rgba(0, 0, 0, 0); }
   #printRoot .print-page:last-child {
     break-after: auto;
     page-break-after: auto;
-  }
-  #printRoot .print-furniture {
-    position: absolute !important;
-    inset: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    margin: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-  }
-  #printRoot .print-page-body {
-    position: absolute;
-    overflow: hidden;
-  }
-  #printRoot .print-page-content {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
   }
   /* 克隆正文里的分页间隔必须保留原高度，否则每页内容和屏幕对不上；
      但它不再负责分页（纸张边界已经由 print-page 强制） */

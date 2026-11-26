@@ -38,7 +38,9 @@ for index in 0..<document.pageCount {
     if !text.contains("内部资料") {
         problems.append("第 \(page) 页缺少页脚")
     }
-    if !text.contains("— \(page) —") {
+    // PDF 提取可能在“—”和数字之间插空格/换行；去掉空白再比对
+    let compact = text.replacingOccurrences(of: " ", with: "")
+    if !compact.contains("—\(page)—") {
         problems.append("第 \(page) 页缺少页码（期望 — \(page) —）")
     }
 }
