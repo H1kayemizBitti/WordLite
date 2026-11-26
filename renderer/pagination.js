@@ -156,7 +156,7 @@ function setDecorations (view, breaks) {
   const decorations = []
   for (const item of breaks) {
     const dom = document.createElement('span')
-    dom.className = 'page-gap-widget'
+    dom.className = item.forced ? 'page-gap-widget page-gap-widget-forced' : 'page-gap-widget'
     dom.contentEditable = 'false'
     dom.setAttribute('aria-hidden', 'true')
     dom.style.height = `${Math.max(0, item.height).toFixed(2)}px`
@@ -222,7 +222,16 @@ export function createPaginator ({
         continue
       }
       const groups = textLineGroups(block.el)
-      const count = Math.max(1, groups.length)
+      let count = groups.length
+      // 固定值行距（20pt 这类）下相邻行的字形可能互相压住，按矩形分行会少算；
+      // 行高本身是锁死的，直接按块高 / 行距算行数。
+      const exactLine = /^([\d.]+)pt$/i.exec(block.el.style.lineHeight || '')
+      if (exactLine) {
+        const linePx = Number(exactLine[1]) * (96 / 72)
+        const byHeight = Math.max(1, Math.round(height / linePx))
+        if (byHeight >= count) count = byHeight
+      }
+      count = Math.max(1, count)
       const spacing = height / count
       for (let i = 0; i < count; i += 1) {
         items.push({
@@ -270,6 +279,7 @@ export function createPaginator ({
             pos: forceAfter,
             height: delta,
             target,
+            forced: true,
             el: item.el,
             lineIndex: item.lineIndex,
             boundary: item.lineIndex === 0 || item.kind === 'atomic'
@@ -352,14 +362,17 @@ export function createPaginator ({
     }
 
     lastItems = items
-    return { breaks, pageCount: page + 1, paperTop }
+    return { breaks, pageCount: page + 1 }
   }
 
   // 落点校正：块边界会有外边距打架，行内断点会有缩放/亚像素误差。
   // 行内断点看它自己那个间隔 widget 的下沿——那正是下一行的行框顶，比量字形更稳。
   // 按顺序量每个断点实际落在哪，用累计误差算各间隔该补多少。
-  function correctBreaks (breaks, paperTop, scale) {
+  function correctBreaks (breaks, scale) {
     if (!breaks.length) return false
+    // 间隔插进去以后纸张高度会变，滚动条可能跟着锚定；这里必须用当下的纸张顶，
+    // 不能用插入前记的坐标，否则滚到文末时误差会累积成几十个空白页。
+    const paperTop = paper.getBoundingClientRect().top
     const widgets = Array.from(editor.view.dom.querySelectorAll('.page-gap-widget'))
     let prevError = 0
     let changed = false
@@ -435,7 +448,7 @@ export function createPaginator ({
 
       // 落点误差校正，最多两轮
       for (let i = 0; i < 2; i += 1) {
-        if (!correctBreaks(breaks, first.paperTop, scale)) break
+        if (!correctBreaks(breaks, scale)) break
         setDecorations(editor.view, breaks)
         paper.getBoundingClientRect()
       }

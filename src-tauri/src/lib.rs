@@ -1694,10 +1694,21 @@ pub fn run() {
                                         longHtml = '<p>测试分页内容，这是一段用于验证打印预览自动分页的示例文字。</p>'.repeat(600);
                                     }}
                                     document.execCommand('insertHTML', false, longHtml);
-                                    await new Promise((resolve) => setTimeout(resolve, 500));
+                                    // 等屏幕分页排完，打印页数必须和它一致（打印与页面同一断点）
+                                    let longScreenPages = 0;
+                                    for (let pageWait = 0; pageWait < 30; pageWait++) {{
+                                        const pageState = window.__wordlitePagination.state();
+                                        if (pageState.sheetCount > 1 && pageState.sheetCount === pageState.pageCount) {{
+                                            longScreenPages = pageState.pageCount;
+                                            break;
+                                        }}
+                                        await new Promise((resolve) => setTimeout(resolve, 100));
+                                    }}
+                                    results.longScreenPages = longScreenPages;
                                     results.longChars = editorEl.innerText.length;
                                     const longPdf = await withTimeout(window.wordlite.file.printToPDF(), 40000);
                                     results.longPdfPages = (atob(longPdf).match(/\/Type\s*\/Page[^s]/g) || []).length;
+                                    results.longPdfMatchesScreen = longScreenPages > 0 && results.longPdfPages === longScreenPages;
                                     // 完整 PDF 落盘，交给 CI 上传后人工检查尺寸和边距
                                     await window.wordlite.file.writeFile({long_pdf}, longPdf, true);
                                     results.longPdfFile = {long_pdf};
@@ -1837,6 +1848,39 @@ pub fn run() {
                                 results.pagePaginationRestore = restoredState.collapsed === false && restoredGap > 10;
                             }} catch (pageError) {{
                                 results.pagePaginationError = String(pageError);
+                            }}
+                            // 段落设置：固定行距 20 磅 + 段前 12 磅 + 段后 8 磅
+                            try {{
+                                const paragraphEditor = editorEl.editor;
+                                paragraphEditor.commands.setContent('<p>第一段文字</p><p>第二段文字</p>');
+                                paragraphEditor.commands.setTextSelection({{ from: 1, to: 6 }});
+                                document.querySelector('#btnOpenParagraph').click();
+                                await new Promise((resolve) => setTimeout(resolve, 120));
+                                const paragraphOpen = document.querySelector('#paragraphDialog').open;
+                                const setParagraphValue = (selector, value, eventName) => {{
+                                    const el = document.querySelector(selector);
+                                    el.value = value;
+                                    el.dispatchEvent(new Event(eventName, {{ bubbles: true }}));
+                                }};
+                                setParagraphValue('#paraLineMode', 'exact', 'change');
+                                setParagraphValue('#paraLinePt', '20', 'input');
+                                setParagraphValue('#paraBefore', '12', 'input');
+                                setParagraphValue('#paraAfter', '8', 'input');
+                                document.querySelector('#paragraphForm').requestSubmit();
+                                await new Promise((resolve) => setTimeout(resolve, 250));
+                                const paragraphNode = paragraphEditor.getJSON().content[0];
+                                const paragraphStyle = getComputedStyle(editorEl.querySelector('p'));
+                                const paragraphClosed = !document.querySelector('#paragraphDialog').open;
+                                results.paragraphDialog = paragraphOpen && paragraphClosed &&
+                                    document.querySelector('#paraLinePt').disabled === false;
+                                results.paragraphExactLine = paragraphNode.attrs.lineHeight === '20pt' &&
+                                    paragraphStyle.lineHeight === '26.6667px';
+                                results.paragraphSpacing = paragraphNode.attrs.spacingBefore === 12 &&
+                                    paragraphNode.attrs.spacingAfter === 8 &&
+                                    paragraphStyle.marginTop === '16px' &&
+                                    paragraphStyle.marginBottom === '10.6667px';
+                            }} catch (paragraphError) {{
+                                results.paragraphError = String(paragraphError);
                             }}
                             try {{
                                 await withTimeout(window.__TAURI__.core.invoke('open_external', {{ path: {probe} }}), 5000);

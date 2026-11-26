@@ -98,6 +98,7 @@
               <option value="2">2 倍</option>
               <option value="2.5">2.5 倍</option>
               <option value="3">3 倍</option>
+              <option value="__paragraph__">固定值…</option>
             </select>
           </div>
           <div class="row">
@@ -121,6 +122,7 @@
             <label class="mini-label" for="spacingAfter">段后</label>
             <input id="spacingAfter" class="num-input" type="number" min="0" max="200" step="1" placeholder="0" title="段后间距（磅）">
             <span class="unit">磅</span>
+            <button class="tbtn" id="btnOpenParagraph" type="button" title="段落设置：行距、段前、段后">段落…</button>
           </div>
         </div>
       </div>
@@ -514,6 +516,57 @@
       <span class="spacer"></span>
       <button class="tbtn" id="btnCancelSettings" type="button">取消</button>
       <button class="tbtn primary" type="submit">保存设置</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 段落设置 -->
+<dialog class="dialog paragraph-dialog" id="paragraphDialog" aria-label="段落设置">
+  <div class="dialog-head">
+    <h2>段落</h2>
+    <button class="dialog-close" type="button" data-close-dialog="paragraphDialog" aria-label="关闭">×</button>
+  </div>
+  <form id="paragraphForm">
+    <div class="dialog-body">
+      <p class="dialog-note">行距和段前/段后都用磅；固定值会像 Word 一样把行高锁死。确定后马上作用到页面和打印。</p>
+      <div class="form-grid">
+        <label for="paraLineMode">行距</label>
+        <div class="inline-field">
+          <select id="paraLineMode" class="select wide-select">
+            <option value="">默认（跟随设置）</option>
+            <option value="1">单倍行距</option>
+            <option value="1.15">1.15 倍行距</option>
+            <option value="1.25">1.25 倍行距</option>
+            <option value="1.5">1.5 倍行距</option>
+            <option value="1.75">1.75 倍行距</option>
+            <option value="2">2 倍行距</option>
+            <option value="2.5">2.5 倍行距</option>
+            <option value="3">3 倍行距</option>
+            <option value="exact">固定值</option>
+          </select>
+          <input id="paraLinePt" class="text-input short-input" type="number" min="1" max="500" step="0.5" value="20" disabled>
+          <span class="unit">磅</span>
+        </div>
+        <label for="paraBefore">段前</label>
+        <div class="inline-field">
+          <input id="paraBefore" class="text-input short-input" type="number" min="0" max="200" step="1" placeholder="0">
+          <span class="unit">磅</span>
+        </div>
+        <label for="paraAfter">段后</label>
+        <div class="inline-field">
+          <input id="paraAfter" class="text-input short-input" type="number" min="0" max="200" step="1" placeholder="0">
+          <span class="unit">磅</span>
+        </div>
+      </div>
+      <div class="paragraph-preview" id="paragraphPreview">
+        <p>简写 WordLite 段落预览</p>
+        <p>第二段：行距、段前、段后都会反映在这里。</p>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <span class="spacer"></span>
+      <button class="tbtn" type="button" id="btnCancelParagraph">取消</button>
+      <button class="tbtn primary" type="submit">确定</button>
     </div>
   </form>
 </dialog>

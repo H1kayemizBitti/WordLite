@@ -15,6 +15,7 @@ import {
   HorizontalPositionRelativeFrom,
   ImageRun,
   LevelFormat,
+  LineRuleType,
   Packer,
   PageBreak,
   PageOrientation,
@@ -143,9 +144,17 @@ function paragraphStylesFromXml (xml) {
       const before = Number.parseFloat(spacing.getAttribute('w:before'))
       const after = Number.parseFloat(spacing.getAttribute('w:after'))
       const line = Number.parseFloat(spacing.getAttribute('w:line'))
+      const rule = spacing.getAttribute('w:lineRule') || 'auto'
       if (Number.isFinite(before)) style.spacingBefore = Math.round(before / 20 * 10) / 10
       if (Number.isFinite(after)) style.spacingAfter = Math.round(after / 20 * 10) / 10
-      if (Number.isFinite(line) && line > 0) style.lineHeight = Math.round(line / 240 * 100) / 100
+      if (Number.isFinite(line) && line > 0) {
+        // 固定值/最小值用磅存；多倍行距仍存倍数。最小值和固定值在网页里都按固定行高处理。
+        if (rule === 'exact' || rule === 'exactly' || rule === 'atLeast') {
+          style.lineHeight = `${Math.round(line / 20 * 10) / 10}pt`
+        } else {
+          style.lineHeight = Math.round(line / 240 * 100) / 100
+        }
+      }
     }
     const runSpacings = []
     for (const run of Array.from(paragraph.getElementsByTagName('w:r'))) {
@@ -895,9 +904,17 @@ const HEADINGS = {
 
 async function paragraph (node, context = {}, leadingRuns = []) {
   const attrs = node.attrs || {}
-  const lineHeight = Number.parseFloat(attrs.lineHeight)
+  const rawLineHeight = attrs.lineHeight == null ? '' : String(attrs.lineHeight)
+  const exactLine = /^([\d.]+)pt$/i.exec(rawLineHeight)
+  const lineHeight = Number.parseFloat(rawLineHeight)
   const spacing = {}
-  if (Number.isFinite(lineHeight)) spacing.line = Math.round(lineHeight * 240)
+  if (exactLine) {
+    spacing.line = Math.round(Number(exactLine[1]) * 20)
+    spacing.lineRule = LineRuleType.EXACT
+  } else if (Number.isFinite(lineHeight)) {
+    spacing.line = Math.round(lineHeight * 240)
+    spacing.lineRule = LineRuleType.AUTO
+  }
   if (Number.isFinite(attrs.spacingBefore)) spacing.before = Math.round(attrs.spacingBefore * 20)
   if (Number.isFinite(attrs.spacingAfter)) spacing.after = Math.round(attrs.spacingAfter * 20)
   const image = node.content?.find((child) => child.type === 'image')

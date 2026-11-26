@@ -534,7 +534,32 @@ document.querySelector('#blockStyle').addEventListener('change', (e) => {
   chain.run()
 })
 
+// 行距下拉里临时插入的“固定值 / 非标准倍数”选项：只保留当前值一个，换段落就清掉
+function syncDynamicOption (select, value, label) {
+  select.querySelectorAll('option[data-dynamic]').forEach((option) => {
+    if (option.value !== value) option.remove()
+  })
+  if (!value) {
+    select.value = ''
+    return
+  }
+  let option = Array.from(select.options).find((item) => item.value === value)
+  if (!option) {
+    option = document.createElement('option')
+    option.value = value
+    option.dataset.dynamic = '1'
+    select.appendChild(option)
+  }
+  if (option.dataset.dynamic) option.textContent = label
+  select.value = value
+}
+
 document.querySelector('#lineHeight').addEventListener('change', (e) => {
+  if (e.target.value === '__paragraph__') {
+    openParagraphDialog()
+    syncToolbar()
+    return
+  }
   editor.chain().focus().setLineHeight(e.target.value || null).run()
 })
 
@@ -552,6 +577,80 @@ document.querySelector('#spacingBefore').addEventListener('change', (e) => {
 
 document.querySelector('#spacingAfter').addEventListener('change', (e) => {
   editor.chain().focus().setBlockSpacing({ spacingAfter: e.target.value === '' ? null : e.target.value }).run()
+})
+
+/* ---------------- 段落设置（行距 / 段前 / 段后） ---------------- */
+
+const paragraphDialog = document.querySelector('#paragraphDialog')
+const paragraphPreview = document.querySelector('#paragraphPreview')
+const paraLineMode = document.querySelector('#paraLineMode')
+const paraLinePt = document.querySelector('#paraLinePt')
+const paraBefore = document.querySelector('#paraBefore')
+const paraAfter = document.querySelector('#paraAfter')
+
+function updateParagraphPreview () {
+  const mode = paraLineMode.value
+  if (mode === 'exact') {
+    paragraphPreview.style.lineHeight = `${clamp(paraLinePt.value, 1, 500, 20)}pt`
+  } else {
+    paragraphPreview.style.lineHeight = mode || ''
+  }
+  const before = paraBefore.value === '' ? 0 : clamp(paraBefore.value, 0, 200, 0)
+  const after = paraAfter.value === '' ? 0 : clamp(paraAfter.value, 0, 200, 0)
+  for (const p of paragraphPreview.querySelectorAll('p')) {
+    p.style.marginTop = `${before}pt`
+    p.style.marginBottom = `${after}pt`
+  }
+}
+
+function openParagraphDialog () {
+  const block = currentBlockAttributes()
+  const raw = block.lineHeight == null ? '' : String(block.lineHeight)
+  const exact = /^([\d.]+)pt$/i.exec(raw)
+  // 清掉上一次为“非标准倍数”临时加的选项
+  paraLineMode.querySelectorAll('option[data-dynamic]').forEach((option) => option.remove())
+  paraLinePt.disabled = !exact
+  if (exact) {
+    paraLineMode.value = 'exact'
+    paraLinePt.value = String(Number(exact[1]))
+  } else if (raw && !Array.from(paraLineMode.options).some((option) => option.value === raw)) {
+    const option = document.createElement('option')
+    option.value = raw
+    option.textContent = `${raw} 倍行距`
+    option.dataset.dynamic = '1'
+    paraLineMode.appendChild(option)
+    paraLineMode.value = raw
+  } else {
+    paraLineMode.value = raw
+  }
+  paraBefore.value = Number.isFinite(block.spacingBefore) ? block.spacingBefore : ''
+  paraAfter.value = Number.isFinite(block.spacingAfter) ? block.spacingAfter : ''
+  updateParagraphPreview()
+  if (!paragraphDialog.open) paragraphDialog.showModal()
+}
+
+document.querySelector('#btnOpenParagraph').addEventListener('click', openParagraphDialog)
+document.querySelector('#btnCancelParagraph').addEventListener('click', () => paragraphDialog.close())
+paraLineMode.addEventListener('change', () => {
+  paraLinePt.disabled = paraLineMode.value !== 'exact'
+  updateParagraphPreview()
+})
+for (const input of [paraLinePt, paraBefore, paraAfter]) {
+  input.addEventListener('input', updateParagraphPreview)
+}
+
+document.querySelector('#paragraphForm').addEventListener('submit', (event) => {
+  event.preventDefault()
+  const mode = paraLineMode.value
+  const chain = editor.chain().focus()
+  if (!mode) chain.setLineHeight(null)
+  else if (mode === 'exact') chain.setLineHeight(`${Math.round(clamp(paraLinePt.value, 1, 500, 20) * 2) / 2}pt`)
+  else chain.setLineHeight(mode)
+  const before = paraBefore.value === '' ? null : clamp(paraBefore.value, 0, 200, 0)
+  const after = paraAfter.value === '' ? null : clamp(paraAfter.value, 0, 200, 0)
+  chain.setBlockSpacing({ spacingBefore: before, spacingAfter: after }).run()
+  paragraphDialog.close()
+  syncToolbar()
 })
 
 /* ---------------- 工具按钮 ---------------- */
@@ -2908,7 +3007,13 @@ function syncToolbar () {
   else document.querySelector('#blockStyle').value = 'paragraph'
 
   const block = currentBlockAttributes()
-  document.querySelector('#lineHeight').value = block.lineHeight || ''
+  const lineHeightValue = block.lineHeight == null ? '' : String(block.lineHeight)
+  const exactLine = /^([\d.]+)pt$/i.exec(lineHeightValue)
+  syncDynamicOption(
+    document.querySelector('#lineHeight'),
+    lineHeightValue,
+    exactLine ? `固定值 ${Number(exactLine[1])} 磅` : `${lineHeightValue} 倍`
+  )
   document.querySelector('#spacingBefore').value = Number.isFinite(block.spacingBefore) ? block.spacingBefore : ''
   document.querySelector('#spacingAfter').value = Number.isFinite(block.spacingAfter) ? block.spacingAfter : ''
 

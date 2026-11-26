@@ -11,7 +11,9 @@ const REQUIRED_BOOL = [
   'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog', 'pagePinchWheel',
   // 屏幕分页：多页、页缝无字、不改文档、双击收起/恢复
   'pagePagination', 'pagePaginationNoGapText', 'pagePaginationModel',
-  'pagePaginationCollapse', 'pagePaginationRestore'
+  'pagePaginationCollapse', 'pagePaginationRestore',
+  // 段落设置：对话框能开/关、固定值 20 磅、段前段后 12/8 磅
+  'paragraphDialog', 'paragraphExactLine', 'paragraphSpacing'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',
@@ -74,6 +76,10 @@ function main () {
     // V2：自定义预览已删除，不再有 previewPages；长文档导出 PDF 至少两页即为分页成功
     if (!(results.longPdfPages >= 2)) {
       problems.push(`longPdfPages 应 ≥ 2，实际 ${JSON.stringify(results.longPdfPages)}`)
+    }
+    // 打印/PDF 的页数必须和屏幕分页一致（同一套断点）
+    if (results.longPdfMatchesScreen !== true) {
+      problems.push(`longPdfMatchesScreen 应为 true（屏幕 ${JSON.stringify(results.longScreenPages)} 页，PDF ${JSON.stringify(results.longPdfPages)} 页）`)
     }
   }
 
