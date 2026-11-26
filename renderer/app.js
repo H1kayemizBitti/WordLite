@@ -4406,6 +4406,8 @@ async function directPrint () {
   if (printing || document.querySelector('dialog[open]')) return
   printing = true
   printRestoreFocus = editor.view.hasFocus()
+  // 最后一次编辑可能还在 180ms 防抖里；打印前强制重排，保证打印和屏幕同一套断点
+  paginator?.runNow()
   try {
     await clearPrintFocus()
   } catch (error) {
@@ -4434,6 +4436,7 @@ window.addEventListener('beforeprint', () => {
   if (printing) return
   printing = true
   printRestoreFocus = editor.view.hasFocus()
+  paginator?.runNow()
   clearPrintFocus().catch(() => {})
 })
 
@@ -4453,6 +4456,8 @@ async function clearPrintFocus () {
 
 async function exportPdf () {
   const editorHadFocus = editor.view.hasFocus()
+  // 和打印一样：先把分页排到最新，导出的 PDF 才和屏幕逐页一致
+  paginator?.runNow()
   await clearPrintFocus()
   const defaultPath = `${currentFileName.replace(/\.[^.]+$/, '')}.pdf`
   try {
