@@ -5049,7 +5049,9 @@ function buildExplicitPrintPages () {
     }
 
     const offset = editorOffset - geom.marginTop - i * pitch
-    content.style.transform = `translateY(${offset.toFixed(2)}px)`
+    // 用绝对定位的 top 而不是 transform：Chromium/WebKit 的打印分页
+    // 会把带 transform 的绝对定位内容在后续页整体下移，页底内容被裁掉
+    content.style.top = `${offset.toFixed(2)}px`
     content.appendChild(clone)
     body.appendChild(content)
     page.appendChild(body)
@@ -5083,7 +5085,7 @@ function buildExplicitPrintPages () {
     const shift = liveTop - cloneTop
     if (Math.abs(shift) > 0.05) {
       for (const item of contents) {
-        item.content.style.transform = `translateY(${(item.offset + shift).toFixed(2)}px)`
+        item.content.style.top = `${(item.offset + shift).toFixed(2)}px`
       }
     }
   }

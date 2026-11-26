@@ -45,8 +45,30 @@ for index in 0..<document.pageCount {
     }
 }
 
+// 显式纸张自测样张是 120 段带编号的正文；逐段核对，防止页底内容被裁掉。
+// 样张段数改了的话，这里也要同步。
+let allText = (0..<document.pageCount)
+    .map { squash(document.page(at: $0)?.string ?? "") }
+    .joined(separator: " ")
+let pattern = "第\\s*(\\d+)\\s*段"
+let regex = try! NSRegularExpression(pattern: pattern)
+let nsText = allText as NSString
+var counts: [Int: Int] = [:]
+regex.enumerateMatches(in: allText, range: NSRange(location: 0, length: nsText.length)) { match, _, _ in
+    guard let match = match, let range = Range(match.range(at: 1), in: allText),
+          let number = Int(allText[range]) else { return }
+    counts[number, default: 0] += 1
+}
+for number in 1...120 {
+    if let count = counts[number], count > 1 {
+        problems.append("第 \(number) 段出现 \(count) 次")
+    } else if counts[number] == nil {
+        problems.append("PDF 缺少第 \(number) 段")
+    }
+}
+
 if problems.isEmpty {
-    print("PDF 页眉页脚页码检查通过（\(document.pageCount) 页）")
+    print("PDF 页眉页脚页码检查通过（\(document.pageCount) 页，120 段正文完整）")
 } else {
     problems.forEach { FileHandle.standardError.write(($0 + "\n").data(using: .utf8)!) }
     exit(1)
