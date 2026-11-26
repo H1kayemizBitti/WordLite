@@ -640,6 +640,8 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
 /* 缩放容器：宽高由脚本按“纸张尺寸 × 缩放”撑开，
    这样 transform 只改变显示，不参与排版，滚动条和居中都和 100% 时一致 */
 .paper-scaler {
+  width: 21cm;
+  height: 29.7cm;
   margin: 0 auto;
   position: relative;
 }

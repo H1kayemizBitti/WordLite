@@ -3814,6 +3814,19 @@ const selectionPaper = document.querySelector('.paper')
 if (isMac && selectionPaper) selectionPaper.appendChild(selectionLayer)
 
 let selectionOverlayFrame = 0
+// 动态挂一条全局 ::selection 规则：Safari 对带后代选择器的 ::selection 支持不稳，
+// 真正要隐藏原生高亮时，用最普通、全局的写法最保险
+const nativeSelectionHideStyle = document.createElement('style')
+nativeSelectionHideStyle.textContent =
+  '::selection { background-color: rgba(0, 0, 0, 0) !important; }'
+let nativeSelectionHidden = false
+
+function setNativeSelectionHidden (hidden) {
+  if (hidden === nativeSelectionHidden) return
+  nativeSelectionHidden = hidden
+  if (hidden) document.head.appendChild(nativeSelectionHideStyle)
+  else nativeSelectionHideStyle.remove()
+}
 
 function selectionCrossesGap (range) {
   for (const gap of editor.view.dom.querySelectorAll('.page-gap-widget')) {
@@ -3874,6 +3887,7 @@ function selectionRectsInPaper (range) {
 
 function clearSelectionOverlay () {
   document.body.classList.remove('cross-page-selection')
+  setNativeSelectionHidden(false)
   if (selectionLayer.childElementCount) selectionLayer.replaceChildren()
 }
 
@@ -3893,6 +3907,7 @@ function renderSelectionOverlay () {
     return
   }
   document.body.classList.add('cross-page-selection')
+  setNativeSelectionHidden(true)
   const rects = selectionRectsInPaper(range)
   selectionLayer.replaceChildren(...rects.map((rect) => {
     const div = document.createElement('div')
