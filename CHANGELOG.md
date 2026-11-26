@@ -2,6 +2,17 @@
 
 简写 WordLite 项目从 v0.1.0 的 Electron 版本起步，v1.0.0 是迁移到 Tauri 2 后的第一个正式版本。
 
+## v1.1.6（2026-11-26）
+
+### 修复
+
+- **触控板双指捏合（真根因）**：wry 把 Tauri 的 `zoom_hotkeys_enabled`（默认 false）同时写进 `IsZoomControlEnabled` 和 `IsPinchZoomEnabled`；后者一关，WebView2 根本不做捏合识别，原生层和 DOM 层都收不到任何事件。现在显式 `SetIsPinchZoomEnabled(true)`，捏合以 WebView2 合成的 `ctrl+wheel` 到渲染层；之前那套 `WM_GESTURE` / `RegisterTouchWindow` 子类全部删掉。
+- **捏合是连续缩放**：渲染层用「`ctrlKey=true` 但没有物理 Ctrl」区分捏合和真 Ctrl+滚轮；捏合连续跟手，真 Ctrl+滚轮仍按档位走。
+
+### 改进
+
+- **缩放范围 10%–400%**：原来 50%–200% 太小，现在按钮、Ctrl+滚轮、捏合都能到 10% 和 400%。
+
 ## v1.1.5（2026-11-26）
 
 ### 修复
