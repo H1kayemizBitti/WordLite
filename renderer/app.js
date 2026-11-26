@@ -3017,7 +3017,7 @@ function renderPageZoom (value) {
   if (!paper) return false
   renderedZoom = value
   paper.style.zoom = value === 100 ? '' : `${value / 100}`
-  document.querySelector('#btnZoomReset').textContent = `${value}%`
+  document.querySelector('#btnZoomReset').textContent = `${Math.round(value)}%`
   document.querySelector('#btnZoomOut').disabled = value <= ZOOM_MIN
   document.querySelector('#btnZoomIn').disabled = value >= ZOOM_MAX
   return true
@@ -3107,7 +3107,7 @@ function beginPinchZoom (x, y) {
 function updatePinchZoom (scale) {
   if (pinchBaseZoom === null) return false
   queuePinchPreview(clamp(
-    Math.round(pinchBaseZoom * scale),
+    pinchBaseZoom * scale,
     ZOOM_MIN, ZOOM_MAX, pinchBaseZoom
   ))
   return true
@@ -3162,22 +3162,40 @@ function isPinchWheel (event) {
 }
 
 // 一连串捏合 delta 当成一次手势：连续预览，180ms 没有新事件就落定。
+// 跟手：基础灵敏度比旧版高，再按「单位时间移动量」加一个速度增益——
+// 慢捏微调，快捏一次走得多。参数都可调。
+const PINCH_BASE = 0.004
+const PINCH_SPEED_GAIN = 4.5
+const PINCH_GAIN_MAX = 5
 let wheelZoomTimer = 0
 let wheelZoomTarget = null
+let wheelLastAt = 0
+let wheelSpeed = 0
 
 window.__wordliteWheelZoom = (delta, x, y) => {
   if (document.querySelector('dialog[open]')) return false
   if (pinchBaseZoom === null) {
     if (!beginPinchZoom(x, y)) return false
     wheelZoomTarget = pageZoom
+    wheelLastAt = 0
+    wheelSpeed = 0
   }
-  const factor = Math.pow(1.0018, Number(delta) || 0)
-  wheelZoomTarget = clamp(Math.round(wheelZoomTarget * factor), ZOOM_MIN, ZOOM_MAX, wheelZoomTarget)
+  const now = performance.now()
+  const dt = wheelLastAt ? Math.max(8, now - wheelLastAt) : 16
+  wheelLastAt = now
+  const amount = Math.abs(Number(delta) || 0)
+  const instant = amount / dt
+  wheelSpeed = wheelSpeed ? wheelSpeed * 0.7 + instant * 0.3 : instant
+  const gain = clamp(1 + wheelSpeed * PINCH_SPEED_GAIN, 1, PINCH_GAIN_MAX)
+  const factor = Math.pow(1 + PINCH_BASE, (Number(delta) || 0) * gain)
+  wheelZoomTarget = clamp(wheelZoomTarget * factor, ZOOM_MIN, ZOOM_MAX, wheelZoomTarget)
   queuePinchPreview(wheelZoomTarget)
   clearTimeout(wheelZoomTimer)
   wheelZoomTimer = setTimeout(() => {
     wheelZoomTimer = 0
     wheelZoomTarget = null
+    wheelLastAt = 0
+    wheelSpeed = 0
     endPinchZoom()
   }, 180)
   return true
@@ -3852,7 +3870,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.7'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.8'}`
 
 /* ---------------- 查找替换 ---------------- */
 
