@@ -3425,6 +3425,8 @@ const ZOOM_STEPS = [10, 25, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 25
 // 打开固定 100%，不恢复上次比例（上次存的值可能把默认顶成 150% 之类）
 let pageZoom = 100
 let renderedZoom = 100
+// PDF 屏幕捕获期间由捕获流程自己控制 paperScaler 尺寸，ResizeObserver 不要抢
+let pdfCaptureActive = false
 let lastPointer = null
 let pinchAnchor = null
 
@@ -3446,6 +3448,7 @@ function zoomAnchor () {
 // 外层的 paperScaler 按“纸张尺寸 × 缩放”撑开，滚动条和居中跟 100% 一致；
 // .paper 自己只做 transform，排版尺寸始终不变。
 function syncPaperScaler () {
+  if (pdfCaptureActive) return
   const paper = document.querySelector('.paper')
   const scaler = document.querySelector('#paperScaler')
   if (!paper || !scaler) return
@@ -4978,6 +4981,7 @@ function beginPdfCapture () {
   }
   paginator.runNow()
 
+  pdfCaptureActive = true
   document.documentElement.classList.add('pdf-capture')
   document.body.classList.add('pdf-capture')
   if (pageSetup.pageNumber !== 'print') {
@@ -5004,6 +5008,7 @@ function beginPdfCapture () {
 
 function finishPdfCapture (state) {
   if (!state) return
+  pdfCaptureActive = false
   document.documentElement.classList.remove('pdf-capture')
   document.body.classList.remove('pdf-capture', 'pdf-capture-no-numbers')
   const paper = document.querySelector('.paper')

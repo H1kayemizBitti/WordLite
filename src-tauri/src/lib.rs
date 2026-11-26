@@ -1113,7 +1113,7 @@ fn capture_pdf_pages(
 
 #[cfg(target_os = "macos")]
 fn merge_pdf_pages(pages: &[Vec<u8>], file_path: &str) -> Result<(), String> {
-    use objc2::ClassType;
+    use objc2::AnyThread;
     use objc2_foundation::{NSData, NSString, NSURL};
     use objc2_pdf_kit::PDFDocument;
 
