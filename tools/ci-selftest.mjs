@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs'
 const PREFIX = '[selftest] '
 const REQUIRED_BOOL = [
   'bridge', 'tauri', 'editor', 'openedNewWindow', 'blankDragOk', 'contextMenuOk', 'printPreviewRemoved',
-  // 页面缩放：控件在、缩放生效、排版像素不变、能回 100%
-  'pageZoomControls', 'pageZoomShrinks', 'pageZoomKeepsLayout', 'pageZoomReset',
+  // 页面缩放：控件在、缩放生效、排版像素不变、外层缩放容器跟随、能回 100%
+  'pageZoomControls', 'pageZoomShrinks', 'pageZoomKeepsLayout', 'pageZoomScaler', 'pageZoomReset',
   // 触控板捏合：预览不写存储、松手落定、有弹窗时忽略、WebView2 合成 wheel 能驱动缩放
   'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog', 'pagePinchWheel',
   // 屏幕分页：多页、页缝无字、不改文档、双击收起/恢复
@@ -19,7 +19,11 @@ const REQUIRED_BOOL = [
   // 默认字体/字号标签、打印关闭保护命令
   'defaultFormatLabels', 'printingGuard',
   // 工具栏单行、右下角详细工具侧板（宽窗停靠不压纸，窄窗浮动卡片）
-  'ribbonSingleRow', 'ribbonDetail', 'ribbonDetailLayout'
+  'ribbonSingleRow', 'ribbonDetail', 'ribbonDetailLayout',
+  // 标签栏撤销/重做按钮
+  'historyButtons',
+  // Mac 显式纸张：页眉页脚页码是每页 DOM，PDF 页数和屏幕一致
+  'explicitPrintOk'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',

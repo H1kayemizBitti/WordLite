@@ -476,6 +476,7 @@ async fn write_file(file_path: String, data: String, binary: bool) -> Result<(),
         data.into_bytes()
     };
     write_atomic(Path::new(&file_path), &bytes)
+        .map_err(|error| format!("写入失败（{file_path}）：{error}"))
 }
 
 #[tauri::command]
@@ -499,10 +500,12 @@ async fn write_autosave(
 ) -> Result<(), String> {
     let path = autosave_path(&app, window.label())?;
     if let Some(directory) = path.parent() {
-        std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(directory)
+            .map_err(|e| format!("创建自动保存目录失败（{}）：{e}", directory.display()))?;
     }
     let bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
     write_atomic(&path, &bytes)
+        .map_err(|e| format!("写入自动保存失败（{}）：{e}", path.display()))
 }
 
 #[tauri::command]
@@ -1601,10 +1604,13 @@ pub fn run() {
                 let long_print =
                     long_print_file.is_some() || args.iter().any(|arg| arg == "--long-print");
                 let dialog_test = args.iter().any(|arg| arg == "--dialog-test");
-                let probe = std::env::temp_dir().join("wordlite-tauri-selftest.txt");
+                // 每次自测用独立文件名：固定文件名可能被杀毒/索引进程捏着句柄，
+                // 原子写入最后一步 rename 就会报“拒绝访问”
+                let run_id = std::process::id();
+                let probe = std::env::temp_dir().join(format!("wordlite-tauri-selftest-{run_id}.txt"));
                 let probe_json = serde_json::to_string(&probe.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "\"\"".into());
-                let probe_bin = std::env::temp_dir().join("wordlite-tauri-selftest.bin");
+                let probe_bin = std::env::temp_dir().join(format!("wordlite-tauri-selftest-{run_id}.bin"));
                 let probe_bin_json = serde_json::to_string(&probe_bin.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "\"\"".into());
                 // 长文档 PDF 落盘位置：CI 用 runner.temp 作 TMPDIR，再按这个路径上传。
@@ -1630,6 +1636,12 @@ pub fn run() {
                 };
                 let long_pdf_json = serde_json::to_string(&long_pdf.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "\"\"".into());
+                // Mac 显式纸张样张：CI 用 PDFKit 检查每页页眉/页脚/页码是否真的进了 PDF
+                let explicit_pdf =
+                    std::env::temp_dir().join("wordlite-selftest-explicit.pdf");
+                let explicit_pdf_json =
+                    serde_json::to_string(&explicit_pdf.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| "\"\"".into());
                 let long_file_json = match &long_print_file {
                     Some(path) => serde_json::to_string(path).unwrap_or_else(|_| "null".into()),
                     None => "null".into(),
@@ -1739,17 +1751,19 @@ pub fn run() {
                                 const paperAt100 = paperEl.getBoundingClientRect().width;
                                 zoomOut.click();
                                 await new Promise((resolve) => setTimeout(resolve, 150));
-                                const shrunk = paperEl.style.zoom;
+                                const shrunk = paperEl.style.transform;
                                 const paperAt90 = paperEl.getBoundingClientRect().width;
+                                const scalerEl = document.querySelector('#paperScaler');
                                 // 排版像素不变：图片宽度和点击定位都按 clientWidth 算，它必须纹丝不动
                                 const columnAt90 = domEl.clientWidth;
-                                results.pageZoomShrinks = shrunk === '0.9' && paperAt90 < paperAt100 * 0.95;
+                                results.pageZoomShrinks = shrunk === 'scale(0.9)' && paperAt90 < paperAt100 * 0.95;
                                 results.pageZoomKeepsLayout = columnAt90 === columnAt100;
+                                results.pageZoomScaler = Math.abs(scalerEl.offsetWidth - paperAt90) <= 1;
                                 results.pageZoomLabel = zoomLabel.textContent;
                                 results.pageZoomStored = JSON.parse(localStorage.getItem('wordlite.zoom.v1'));
                                 zoomLabel.click();
                                 await new Promise((resolve) => setTimeout(resolve, 120));
-                                results.pageZoomReset = paperEl.style.zoom === '' && zoomLabel.textContent === '100%';
+                                results.pageZoomReset = paperEl.style.transform === '' && zoomLabel.textContent === '100%';
                             }} catch (zoomError) {{
                                 results.pageZoomError = String(zoomError);
                             }}
@@ -1770,12 +1784,12 @@ pub fn run() {
                                 pinchPrevented.push(fireGesture('gesturechange', 1.25));
                                 await new Promise((resolve) => requestAnimationFrame(() => resolve()));
                                 results.pagePinchPreview = pinchPrevented.every(Boolean) &&
-                                    paperEl.style.zoom === '1.25' &&
+                                    paperEl.style.transform === 'scale(1.25)' &&
                                     zoomLabel.textContent === '125%' &&
                                     JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === 100;
                                 fireGesture('gestureend', 1.25);
                                 await new Promise((resolve) => setTimeout(resolve, 120));
-                                results.pagePinchCommits = paperEl.style.zoom === '1.25' &&
+                                results.pagePinchCommits = paperEl.style.transform === 'scale(1.25)' &&
                                     zoomLabel.textContent === '125%' &&
                                     JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === 125;
                                 zoomLabel.click();
@@ -1787,7 +1801,7 @@ pub fn run() {
                                 fireGesture('gesturechange', 1.5);
                                 await new Promise((resolve) => requestAnimationFrame(() => resolve()));
                                 results.pagePinchIgnoresDialog = zoomLabel.textContent === '100%' &&
-                                    paperEl.style.zoom === '';
+                                    paperEl.style.transform === '';
                                 probeDialog.close();
                                 probeDialog.remove();
                                 // 触控板捏合：WebView2 的合成事件是 ctrlKey=true、cancelable 的 wheel
@@ -1802,7 +1816,7 @@ pub fn run() {
                                     const wheelZoom = Number(zoomLabel.textContent.replace('%', ''));
                                     results.pagePinchWheel = wheelEvent.defaultPrevented &&
                                         wheelZoom > 100 && wheelZoom <= 1000 &&
-                                        paperEl.style.zoom !== '' &&
+                                        paperEl.style.transform !== '' &&
                                         JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === wheelZoom;
                                     zoomLabel.click();
                                 }} else {{
@@ -2499,6 +2513,95 @@ pub fn run() {
                                 results.viewerOk = false;
                                 results.viewerError = String(viewerError);
                             }}
+                            // Mac 显式纸张：PDF 每页都要有页眉/页脚/页码，且页数和屏幕一致
+                            try {{
+                                if (window.wordlite.platform === 'mac') {{
+                                    const explicitPrint = window.__wordliteExplicitPrint;
+                                    if (!explicitPrint) throw new Error('缺少 __wordliteExplicitPrint');
+                                    document.querySelector('#btnPageSetup').click();
+                                    await new Promise((resolve) => setTimeout(resolve, 120));
+                                    const setSetup = (selector, value, eventName = 'change') => {{
+                                        const el = document.querySelector(selector);
+                                        el.value = value;
+                                        el.dispatchEvent(new Event(eventName, {{ bubbles: true }}));
+                                    }};
+                                    setSetup('#setupPageNumber', 'print');
+                                    setSetup('#setupHeaderText', '简写 WordLite', 'input');
+                                    setSetup('#setupFooterText', '内部资料', 'input');
+                                    setSetup('#setupHeaderFooterAlign', 'center');
+                                    setSetup('#setupHeaderFooterSize', '9', 'input');
+                                    document.querySelector('#pageSetupForm').requestSubmit();
+                                    editorEl.editor.chain().focus().setContent(
+                                        Array.from({{ length: 120 }}, (_, i) =>
+                                            '<p>显式纸张第 ' + (i + 1) + ' 段：用于检查页眉、页脚和页码是否真正进入 PDF。</p>'
+                                        ).join('')
+                                    ).run();
+                                    await new Promise((resolve) => setTimeout(resolve, 1200));
+                                    let screenPages = 0;
+                                    for (let wait = 0; wait < 30; wait += 1) {{
+                                        const pageState = window.__wordlitePagination.state();
+                                        if (pageState.pageCount > 1 && pageState.sheetCount === pageState.pageCount) {{
+                                            screenPages = pageState.pageCount;
+                                            break;
+                                        }}
+                                        await new Promise((resolve) => setTimeout(resolve, 100));
+                                    }}
+                                    const state = explicitPrint.build();
+                                    const pages = document.querySelectorAll('#printRoot .print-page');
+                                    const first = pages[0];
+                                    results.explicitPrintPages = pages.length;
+                                    results.explicitPrintFurniture = !!first &&
+                                        !!first.querySelector('.page-sheet-header') &&
+                                        !!first.querySelector('.page-sheet-footer-text') &&
+                                        !!first.querySelector('.page-sheet-footer-number') &&
+                                        first.querySelector('.page-sheet-header').textContent === '简写 WordLite' &&
+                                        first.querySelector('.page-sheet-footer-text').textContent === '内部资料' &&
+                                        first.querySelector('.page-sheet-footer-number').textContent === '— 1 —';
+                                    const explicitPdf = await withTimeout(window.wordlite.file.printToPDF(), 40000);
+                                    results.explicitPdfPages = (atob(explicitPdf).match(/\/Type\s*\/Page[^s]/g) || []).length;
+                                    results.explicitPdfMatchesScreen = screenPages > 0 &&
+                                        results.explicitPdfPages === screenPages &&
+                                        results.explicitPrintPages === screenPages;
+                                    await window.wordlite.file.writeFile({explicit_pdf}, explicitPdf, true);
+                                    explicitPrint.finish(state);
+                                    await new Promise((resolve) => setTimeout(resolve, 300));
+                                    results.explicitPrintOk = results.explicitPrintPages > 1 &&
+                                        results.explicitPrintFurniture && results.explicitPdfMatchesScreen;
+                                }} else {{
+                                    // Windows 仍走 WebView2 的 @page 页边距盒子，不跑 Mac 专用样张
+                                    results.explicitPrintOk = true;
+                                }}
+                            }} catch (explicitError) {{
+                                results.explicitPrintOk = false;
+                                results.explicitPrintError = String(explicitError);
+                            }}
+                            // 标签栏撤销/重做按钮：可点、可用、按下后真的回退/前进
+                            try {{
+                                const undoBtn = document.querySelector('#btnUndo');
+                                const redoBtn = document.querySelector('#btnRedo');
+                                results.historyButtons = !!undoBtn && !!redoBtn;
+                                if (undoBtn && redoBtn) {{
+                                    const ed = editorEl.editor;
+                                    ed.chain().focus().setContent('<p>history check</p>').run();
+                                    await new Promise((resolve) => setTimeout(resolve, 80));
+                                    const marker = '__WL_HISTORY_TEST__';
+                                    const view = ed.view;
+                                    view.dispatch(view.state.tr.insertText(marker, 1));
+                                    await new Promise((resolve) => setTimeout(resolve, 80));
+                                    const undoEnabled = undoBtn.disabled === false;
+                                    undoBtn.click();
+                                    await new Promise((resolve) => setTimeout(resolve, 100));
+                                    const undone = !ed.state.doc.textContent.includes(marker);
+                                    const redoEnabled = redoBtn.disabled === false;
+                                    redoBtn.click();
+                                    await new Promise((resolve) => setTimeout(resolve, 100));
+                                    const redone = ed.state.doc.textContent.includes(marker);
+                                    results.historyButtons = undoEnabled && undone && redoEnabled && redone;
+                                }}
+                            }} catch (historyError) {{
+                                results.historyButtons = false;
+                                results.historyError = String(historyError);
+                            }}
                             results.state = 'ok';
                         }} catch (error) {{
                             results.error = String(error);
@@ -2509,6 +2612,7 @@ pub fn run() {
                     probe_bin = probe_bin_json,
                     long_pdf = long_pdf_json,
                     long_file = long_file_json,
+                    explicit_pdf = explicit_pdf_json,
                     long_print = if long_print { "true" } else { "false" },
                     dialog_test = if dialog_test { "true" } else { "false" }
                 );

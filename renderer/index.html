@@ -16,6 +16,14 @@
     <button class="tab" data-tab="layout">布局</button>
     <button class="tab" data-tab="file">文件</button>
     <button class="tab" data-tab="more">更多</button>
+    <div class="quick-history" role="group" aria-label="撤销与重做">
+      <button class="quick-btn" id="btnUndo" type="button" title="撤销" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 7a6 6 0 0 1 10.4-2.4"/><path d="M3 3v4h4"/></svg>
+      </button>
+      <button class="quick-btn" id="btnRedo" type="button" title="重做" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7A6 6 0 0 0 2.6 4.6"/><path d="M13 3v4H9"/></svg>
+      </button>
+    </div>
   </nav>
 
   <div class="panels">
@@ -433,11 +441,17 @@
 </aside>
 
 <main id="workspace">
-  <div class="paper">
-    <div class="page-layer" aria-hidden="true"></div>
-    <div id="editor"></div>
+  <!-- 缩放用 transform 做纯显示变换：排版、分页和打印都不受缩放影响 -->
+  <div class="paper-scaler" id="paperScaler">
+    <div class="paper">
+      <div class="page-layer" aria-hidden="true"></div>
+      <div id="editor"></div>
+    </div>
   </div>
 </main>
+
+<!-- Mac 导出 PDF 的显式纸张层：每页一张纸，页眉页脚页码是真实 DOM -->
+<div id="printRoot" aria-hidden="true"></div>
 
 <!-- 查找替换 -->
 <div class="find-bar" id="findBar" hidden>
@@ -832,6 +846,7 @@
       </div>
       <h3>编辑</h3>
       <div class="shortcut-grid">
+        <span>撤销 / 重做</span><kbd>Ctrl+Z / Ctrl+Shift+Z</kbd>
         <span>查找</span><kbd>Ctrl+F</kbd>
         <span>替换</span><kbd>Ctrl+H</kbd>
         <span>下一个 / 上一个匹配</span><kbd>Enter / Shift+Enter</kbd>

@@ -123,6 +123,10 @@ jobs:
           node tools/ci-selftest.mjs selftest-macos.log
           node tools/ci-selftest.mjs selftest-macos-cjk.log
           node tools/ci-selftest.mjs selftest-macos-mixed.log
+      - name: 校验 PDF 页眉页脚页码
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: swift tools/check-pdf-header.swift "$TMPDIR/wordlite-selftest-explicit.pdf"
       - name: 上传 dmg
         uses: actions/upload-artifact@v4
         with:

@@ -117,6 +117,45 @@ body.file-drag-over::after {
 
 .brand-name { font-size: 13.5px; font-weight: 600; letter-spacing: 1px; color: var(--text); }
 
+/* 快速访问：撤销/重做常驻标签栏右侧，切到任何标签都能用 */
+.quick-history {
+  margin-left: auto;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 10px;
+}
+
+.quick-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #4b5563;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s, opacity 0.12s;
+}
+
+.quick-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.quick-btn:hover:not(:disabled) { background: var(--hover-bg); color: var(--text); }
+.quick-btn:active:not(:disabled) { background: var(--active-bg); }
+.quick-btn:disabled { opacity: 0.32; cursor: default; }
+.quick-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 .tab {
   position: relative;
   border: none;
@@ -598,10 +637,18 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
   transition: margin-right 0.16s ease;
 }
 
+/* 缩放容器：宽高由脚本按“纸张尺寸 × 缩放”撑开，
+   这样 transform 只改变显示，不参与排版，滚动条和居中都和 100% 时一致 */
+.paper-scaler {
+  margin: 0 auto;
+  position: relative;
+}
+
 .paper {
   width: 21cm;
-  margin: 0 auto;
+  margin: 0;
   min-height: 29.7cm;
+  transform-origin: top left;
   background: var(--paper);
   padding: 2.54cm 3.18cm;
   border-radius: 2px;
@@ -668,10 +715,38 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
   pointer-events: none;
 }
 
-.paper.paginated #editor {
+.paper #editor {
   position: relative;
   z-index: 1;
 }
+
+/* Mac 跨页选区自绘层：夹在纸张和正文之间，只画真正的文字行 */
+.selection-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.selection-layer .selection-rect {
+  position: absolute;
+  background: #b3d7f5;
+  border-radius: 1px;
+}
+
+/* 跨页时隐藏 WebKit 原生选区（它会把整个页缝间隔块涂蓝），
+   由上面的自绘层只高亮文字 */
+html.is-mac body.cross-page-selection .ProseMirror ::selection,
+html.is-mac body.cross-page-selection .ProseMirror::selection,
+html.is-mac body.cross-page-selection .ProseMirror *::selection {
+  background-color: rgba(0, 0, 0, 0) !important;
+}
+
+/* Safari 对“后代选择器 + ::selection”的支持不稳定，再加一条全局规则：
+   颜色由根变量控制，跨页时把变量设成全透明。变量方案让选择器保持全局，
+   不会因为作用域写法被 WebKit 忽略。 */
+::selection { background-color: var(--wl-selection-color, #b3d7f5) !important; }
+html.cross-page-selection { --wl-selection-color: rgba(0, 0, 0, 0); }
 
 .page-sheet {
   position: absolute;
@@ -759,6 +834,19 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
   line-height: 0;
   pointer-events: none;
   user-select: none;
+  -webkit-user-select: none;
+}
+
+/* WKWebView 的跨页选区会把整个间隔块涂成蓝色，盖住页脚、页缝和下一页页眉。
+   间隔本身没有可见内容，把它裁成零高，选区高亮也一起被裁掉；
+   连续阅读的换页线要保留，所以排除 marker。 */
+.ProseMirror .page-gap-widget:not(.page-break-marker) {
+  clip-path: inset(0 0 100% 0);
+}
+
+.ProseMirror .page-gap-widget::selection,
+.ProseMirror .page-gap-widget *::selection {
+  background: transparent !important;
 }
 
 /* ---------- 状态栏 ---------- */
@@ -1569,8 +1657,12 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
 
 /* ---------- 打印 ---------- */
 
+/* Mac 导出 PDF 用的显式纸张层：屏幕上不占位，只在显式打印模式里显示 */
+#printRoot { display: none; }
+
 @media print {
   dialog, #contextMenu { display: none !important; }
+  body.printing::before { display: none !important; }
   html, body {
     height: auto;
     overflow: visible;
@@ -1586,7 +1678,14 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
     padding: 0;
     background: transparent !important;
   }
+  /* 缩放只是屏幕显示；打印永远按 100% 排版 */
+  .paper-scaler {
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+  }
   .paper {
+    transform: none !important;
     width: var(--print-content-width, 100%) !important;
     max-width: none !important;
     min-height: 0 !important;
@@ -1637,6 +1736,7 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
   .ProseMirror ::selection { background: transparent !important; }
   .ProseMirror::selection { background: transparent !important; }
   .ProseMirror-gapcursor { display: none !important; }
+  .selection-layer { display: none !important; }
   /* 断点由屏幕分页的间隔决定，段落内部允许拆行（和屏幕一致）；
      表格、图片、标题仍然整块不拆。 */
   .ProseMirror > * { break-inside: auto; page-break-inside: auto; }
@@ -1652,4 +1752,78 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
   .ProseMirror [data-resize-container].in-selection [data-resize-wrapper]::after { display: none !important; }
   .find-bar { display: none !important; }
   .ProseMirror .find-match { background: transparent !important; box-shadow: none !important; }
+
+  /* ---- Mac 显式纸张导出：每页一个固定尺寸的 print-page ---- */
+  body.print-explicit #workspace { display: none !important; }
+  body.print-explicit #printRoot { display: block !important; }
+
+  #printRoot .print-page {
+    position: relative;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    box-sizing: border-box;
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #printRoot .print-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  #printRoot .print-furniture {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  #printRoot .print-page-body {
+    position: absolute;
+    overflow: hidden;
+  }
+  #printRoot .print-page-content {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+  /* 克隆正文里的分页间隔必须保留原高度，否则每页内容和屏幕对不上；
+     但它不再负责分页（纸张边界已经由 print-page 强制） */
+  body.print-explicit #printRoot .ProseMirror .page-gap-widget {
+    display: block !important;
+    height: var(--wl-gap-height, 0px) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    break-after: auto !important;
+    page-break-after: auto !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    clip-path: none !important;
+  }
+  body.print-explicit #printRoot .ProseMirror .page-gap-widget-forced { display: none !important; }
+  /* 手动分页符在屏幕上占 24px 外边距和 1px 边框，克隆正文要保持同样的排版高度；
+     只把虚线和文字藏掉，不能像普通打印那样压成 0 高 */
+  body.print-explicit #printRoot .ProseMirror .page-break {
+    height: auto !important;
+    margin: 24px 0 !important;
+    border-top: 1px dashed transparent !important;
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+  body.print-explicit #printRoot .ProseMirror .page-break span {
+    display: inline !important;
+    color: transparent !important;
+    background: transparent !important;
+  }
+  /* 显式纸张直接复刻屏幕分页，所以段距用屏幕值，不能再套打印时的 0.15em */
+  html.is-mac body.print-explicit #printRoot .ProseMirror p { margin-bottom: 0.2em; }
 }
