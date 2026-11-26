@@ -56,9 +56,10 @@ function collectBlocks (root) {
         continue
       }
       if (TEXT_BLOCKS.has(tag)) {
-        // 有图（含缩放容器）的段落不拆行：图片按整段跟着走
-        const atomic = !!el.querySelector('img, [data-resize-container]')
-        blocks.push({ el, atomic })
+        // 标题整块不拆；有图（含缩放容器）的段落也不拆：图片按整段跟着走
+        const heading = /^H[1-6]$/.test(tag)
+        const atomic = heading || !!el.querySelector('img, [data-resize-container]')
+        blocks.push({ el, atomic, heading })
         continue
       }
       // 列表、引用、列表项、表格包装层等容器继续往里找
@@ -210,6 +211,8 @@ export function createPaginator ({
           kind: 'atomic',
           el: block.el,
           pageBreak: !!block.pageBreak,
+          heading: !!block.heading,
+          blockStart: true,
           top,
           height,
           lineIndex: 0,
@@ -225,6 +228,8 @@ export function createPaginator ({
         items.push({
           kind: 'line',
           el: block.el,
+          heading: false,
+          blockStart: i === 0,
           top: top + i * spacing,
           height: spacing,
           lineIndex: i,
@@ -241,10 +246,19 @@ export function createPaginator ({
     let shift = 0
     let page = 0
     let forceAfter = null
+    let headingRun = []
+    let precedingHeadings = []
 
     for (const item of items) {
       let top = item.top + shift
       let bottom = top + item.height
+
+      // 记录“紧挨在当前块前面的连续标题”，下一块的断点如果落在标题下面，
+      // 就把标题一起挪到下一页（Word 的标题与下段同页）
+      if (item.blockStart) {
+        precedingHeadings = headingRun
+        headingRun = item.heading ? [...headingRun, item] : []
+      }
 
       // 手动分页符：先保证它自己不被挤到下一页（那会多出空白页），
       // 再把后面的内容整体推到下一页正文顶
@@ -273,30 +287,61 @@ export function createPaginator ({
           // 单块比一页还高（超高表格/图片）：不拆，溢出并跳过它占的页
           while (bottom > contentBottom(page) + EPS && page < MAX_PAGES) page += 1
         } else {
-          const target = contentTop(page + 1)
-          const delta = target - top
-          if (delta > EPS) {
-            const pos = lineStartPos(
-              editor.view,
-              item.el,
-              item.lineIndex,
-              item.spacing,
-              item.top,
-              paperTop,
-              scale
-            )
-            breaks.push({
-              pos,
-              height: delta,
-              target,
-              el: item.el,
-              lineIndex: item.lineIndex,
-              boundary: item.lineIndex === 0 || item.kind === 'atomic'
-            })
-            shift += delta
-            page += 1
-            top += delta
-            bottom += delta
+          // 标题与下段同页：断点落在新块第一行时，如果前面紧挨着标题，
+          // 把整串标题一起带到下一页。标题链起始必须在本页正文顶之下，
+          // 否则会把这一页顶成空白页，此时宁可不带。
+          let anchor = null
+          if (item.blockStart && precedingHeadings.length) {
+            const first = precedingHeadings[0]
+            if (first.top + shift > contentTop(page) + 4) anchor = first
+          }
+          let movedHeading = false
+          if (anchor) {
+            const target = contentTop(page + 1)
+            const delta = target - (anchor.top + shift)
+            if (delta > EPS) {
+              breaks.push({
+                pos: posBeforeBlock(editor.view, anchor.el),
+                height: delta,
+                target,
+                el: anchor.el,
+                lineIndex: 0,
+                boundary: true
+              })
+              shift += delta
+              page += 1
+              top = item.top + shift
+              bottom = top + item.height
+              movedHeading = true
+            }
+          }
+          // 标题链高到一页放不下时，退回普通断点：标题单独占一页，内容再下一页
+          if (!movedHeading || bottom > contentBottom(page) + EPS) {
+            const target = contentTop(page + 1)
+            const delta = target - top
+            if (delta > EPS) {
+              const pos = lineStartPos(
+                editor.view,
+                item.el,
+                item.lineIndex,
+                item.spacing,
+                item.top,
+                paperTop,
+                scale
+              )
+              breaks.push({
+                pos,
+                height: delta,
+                target,
+                el: item.el,
+                lineIndex: item.lineIndex,
+                boundary: item.lineIndex === 0 || item.kind === 'atomic'
+              })
+              shift += delta
+              page += 1
+              top += delta
+              bottom += delta
+            }
           }
         }
       }
