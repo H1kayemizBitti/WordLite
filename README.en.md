@@ -27,7 +27,7 @@
 <p align="center">
   <img src="docs/screenshot-pagination.png" width="860" alt="WordLite pagination: footer page number, page gap and the next page header">
   <br>
-  <sub>Screen pagination, header/footer and page numbers; print preview and PDF share the same break positions.</sub>
+  <sub>Screen pagination, header/footer and page numbers; text excerpted from 雪原色差. Print preview and PDF share the same break positions.</sub>
 </p>
 
 > The user interface is currently in Simplified Chinese only.

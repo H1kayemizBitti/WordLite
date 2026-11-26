@@ -27,7 +27,7 @@
 <p align="center">
   <img src="docs/screenshot-pagination.png" width="860" alt="简写分页截图：页脚页码、页缝和下一页页眉">
   <br>
-  <sub>屏幕分页、页眉页脚与页码；打印预览和 PDF 使用同一套断点。</sub>
+  <sub>屏幕分页、页眉页脚与页码；正文节选自《雪原色差》。打印预览和 PDF 使用同一套断点。</sub>
 </p>
 
 ## 为什么做它
