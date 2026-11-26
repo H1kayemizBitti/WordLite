@@ -1601,6 +1601,9 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
   .ProseMirror { min-height: 0; }
   .ProseMirror-selectednode { outline: none !important; }
   .ProseMirror p.is-editor-empty:first-child::before { content: none !important; }
+  /* WKWebView 打印时每个短段落的排版比屏幕紧一点点；不缩这一点，屏幕的
+     换页间隔会比打印的自然分页早一段，Mac 上会多出一堆只放一段的孤页。 */
+  html.is-mac .ProseMirror p { margin-bottom: 0.15em; }
   .ProseMirror .column-resize-handle { display: none !important; }
   .ProseMirror .page-break {
     clear: both;

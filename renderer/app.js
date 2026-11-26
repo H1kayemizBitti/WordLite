@@ -96,6 +96,7 @@ const DEFAULT_SETTINGS = {
 const fileApi = window.wordlite.file
 // 平台判断由 tauri-bridge.js 写入；Electron 里没有这个字段，按 Windows 处理
 const isMac = window.wordlite.platform === 'mac'
+document.documentElement.classList.toggle('is-mac', isMac)
 // Mac 上所有快捷键用 ⌘；Ctrl 组合键一律不拦截（Ctrl+A/E/K/H 是系统的文本编辑键位）
 const isMod = (e) => isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey
 const isSmoke = new URLSearchParams(location.search).has('smoke')
@@ -797,8 +798,9 @@ function positionToolDetail () {
   const paperWidth = paper ? paper.getBoundingClientRect().width : 794
   const panelWidth = toolDetailEl.offsetWidth || TOOL_DETAIL_WIDTH
   // 右侧停靠后正文还有地方放整张纸，才停靠；否则用带边距的浮动卡片。
-  // 20px 是纸和面板之间留的呼吸距离。
-  const docked = window.innerWidth >= paperWidth + panelWidth + 20
+  // 不留额外呼吸宽度：1160 的窗口刚好能放下 A4 + 340 侧板，CI 里窗口
+  // 可能比声明的 inner_size 少几像素，留 20px 会把这种情况误判成浮动。
+  const docked = window.innerWidth >= paperWidth + panelWidth
   document.body.classList.toggle('tool-detail-docked', docked)
   document.body.classList.toggle('tool-detail-floating', !docked)
   toolDetailEl.style.top = `${ribbon.bottom + (docked ? 0 : 8)}px`

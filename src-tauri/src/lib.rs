@@ -1941,14 +1941,26 @@ pub fn run() {
                                 const paragraphNode = paragraphEditor.getJSON().content[0];
                                 const paragraphStyle = getComputedStyle(editorEl.querySelector('p'));
                                 const paragraphClosed = !document.querySelector('#paragraphDialog').open;
+                                const paragraphLinePx = Number.parseFloat(paragraphStyle.lineHeight);
+                                const paragraphTopPx = Number.parseFloat(paragraphStyle.marginTop);
+                                const paragraphBottomPx = Number.parseFloat(paragraphStyle.marginBottom);
+                                results.paragraphInfo = {{
+                                    lineHeight: paragraphStyle.lineHeight,
+                                    marginTop: paragraphStyle.marginTop,
+                                    marginBottom: paragraphStyle.marginBottom,
+                                    fontSize: paragraphStyle.fontSize
+                                }};
                                 results.paragraphDialog = paragraphOpen && paragraphClosed &&
                                     document.querySelector('#paraLinePt').disabled === false;
+                                // WKWebView 可能把 20pt / 12pt / 8pt 算成略有小数误差的 px；
+                                // 用 ±0.8px 容差，不写死 26.6667px 这种字符串。
                                 results.paragraphExactLine = paragraphNode.attrs.lineHeight === '20pt' &&
-                                    paragraphStyle.lineHeight === '26.6667px';
+                                    Number.isFinite(paragraphLinePx) &&
+                                    Math.abs(paragraphLinePx - 26.6667) < 0.8;
                                 results.paragraphSpacing = paragraphNode.attrs.spacingBefore === 12 &&
                                     paragraphNode.attrs.spacingAfter === 8 &&
-                                    paragraphStyle.marginTop === '16px' &&
-                                    paragraphStyle.marginBottom === '10.6667px';
+                                    Number.isFinite(paragraphTopPx) && Math.abs(paragraphTopPx - 16) < 0.8 &&
+                                    Number.isFinite(paragraphBottomPx) && Math.abs(paragraphBottomPx - 10.6667) < 0.8;
                             }} catch (paragraphError) {{
                                 results.paragraphError = String(paragraphError);
                             }}
@@ -1979,12 +1991,27 @@ pub fn run() {
                                 const workspaceEl = document.querySelector('#workspace');
                                 const paperEl = document.querySelector('.paper');
                                 const detailRect = detailSheet.getBoundingClientRect();
+                                const workspaceRect = workspaceEl.getBoundingClientRect();
+                                const paperRect = paperEl.getBoundingClientRect();
+                                const workspaceMargin = Number.parseFloat(getComputedStyle(workspaceEl).marginRight);
+                                results.ribbonInfo = {{
+                                    innerWidth: window.innerWidth,
+                                    paperWidth: paperRect.width,
+                                    panelWidth: detailRect.width,
+                                    docked: document.body.classList.contains('tool-detail-docked'),
+                                    workspaceMargin,
+                                    detailLeft: detailRect.left,
+                                    workspaceRight: workspaceRect.right,
+                                    paperRight: paperRect.right,
+                                    ribbonBottom: ribbonRect.bottom,
+                                    detailTop: detailRect.top
+                                }};
                                 results.ribbonDetail = !detailSheet.hidden &&
                                     detailRect.top >= ribbonRect.bottom - 1;
                                 results.ribbonDetailDocked = document.body.classList.contains('tool-detail-docked') &&
-                                    Math.abs(Number.parseFloat(getComputedStyle(workspaceEl).marginRight) - 340) < 2 &&
-                                    detailRect.left >= workspaceEl.getBoundingClientRect().right - 1 &&
-                                    paperEl.getBoundingClientRect().right <= detailRect.left + 1;
+                                    workspaceMargin > 100 &&
+                                    detailRect.left >= workspaceRect.right - 1 &&
+                                    paperRect.right <= detailRect.left + 1;
                                 document.querySelector('#btnToolDetailClose').click();
                             }} catch (ribbonError) {{
                                 results.ribbonSingleRow = false;
