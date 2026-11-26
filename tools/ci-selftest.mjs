@@ -15,7 +15,9 @@ const REQUIRED_BOOL = [
   // 段落设置：对话框能开/关、固定值 20 磅、段前段后 12/8 磅
   'paragraphDialog', 'paragraphExactLine', 'paragraphSpacing',
   // 默认字体/字号标签、打印关闭保护命令
-  'defaultFormatLabels', 'printingGuard'
+  'defaultFormatLabels', 'printingGuard',
+  // 工具栏单行、右下角详细工具侧板
+  'ribbonSingleRow', 'ribbonDetail'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',

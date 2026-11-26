@@ -21,7 +21,7 @@
   <div class="panels">
     <!-- 开始 -->
     <div class="panel active" id="panel-home">
-      <div class="group">
+      <div class="group group-clipboard">
         <div class="group-title">剪贴板</div>
         <div class="group-body">
           <div class="row">
@@ -36,7 +36,7 @@
         </div>
       </div>
 
-      <div class="group">
+      <div class="group group-font">
         <div class="group-title">字体</div>
         <div class="group-body">
           <div class="row">
@@ -72,7 +72,7 @@
         </div>
       </div>
 
-      <div class="group">
+      <div class="group group-paragraph">
         <div class="group-title">段落</div>
         <div class="group-body">
           <div class="row">
@@ -126,7 +126,7 @@
           </div>
         </div>
       </div>
-      <div class="group">
+      <div class="group group-page">
         <div class="group-title">页面</div>
         <div class="group-body">
           <div class="row">
@@ -142,7 +142,7 @@
           </div>
         </div>
       </div>
-      <div class="group">
+      <div class="group group-edit">
         <div class="group-title">编辑</div>
         <div class="group-body">
           <div class="row">
@@ -310,7 +310,127 @@
     <div class="popover-title">突出显示</div>
     <div class="palette" id="highlightPalette"></div>
   </div>
+  <button class="ribbon-expand" id="btnRibbonExpand" type="button" title="展开详细工具" aria-label="展开详细工具" aria-expanded="false">
+    <svg viewBox="0 0 16 16" aria-hidden="true" width="15" height="15"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="6" cy="4" r="1.5" fill="#fff" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="8" r="1.5" fill="#fff" stroke="currentColor" stroke-width="1.2"/><circle cx="5" cy="12" r="1.5" fill="#fff" stroke="currentColor" stroke-width="1.2"/></svg>
+  </button>
 </header>
+
+<!-- 详细工具栏：工具栏压到最小宽度时，从右下角的小图标打开 -->
+<aside class="tool-detail" id="toolDetail" hidden aria-label="详细工具栏">
+  <div class="tool-detail-head">
+    <h2>详细工具</h2>
+    <button class="dialog-close" id="btnToolDetailClose" type="button" aria-label="关闭">×</button>
+  </div>
+  <div class="tool-detail-body">
+    <p class="detail-note">顶部工具栏被压窄时，常用格式都在这里；文档仍然可以正常点选。</p>
+
+    <section>
+      <h3>剪贴板</h3>
+      <div class="detail-buttons">
+        <button class="tbtn" data-cmd="cut" type="button">剪切</button>
+        <button class="tbtn" data-cmd="copy" type="button">复制</button>
+        <button class="tbtn" data-cmd="paste" type="button">粘贴</button>
+        <button class="tbtn" data-cmd="selectAll" type="button">全选</button>
+        <button class="tbtn" data-cmd="formatPainter" type="button">格式刷</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>字体</h3>
+      <div class="detail-row">
+        <label for="detailFont">字体</label>
+        <select id="detailFont" class="select"></select>
+      </div>
+      <div class="detail-row">
+        <label for="detailFontSize">字号</label>
+        <select id="detailFontSize" class="select"></select>
+      </div>
+      <div class="detail-row">
+        <label for="detailBlock">样式</label>
+        <select id="detailBlock" class="select">
+          <option value="paragraph">正文</option>
+          <option value="h1">标题 1</option>
+          <option value="h2">标题 2</option>
+          <option value="h3">标题 3</option>
+        </select>
+      </div>
+      <div class="detail-buttons">
+        <button class="tbtn" data-cmd="bold" type="button"><b>B</b></button>
+        <button class="tbtn" data-cmd="italic" type="button"><i>I</i></button>
+        <button class="tbtn" data-cmd="underline" type="button"><u>U</u></button>
+        <button class="tbtn" data-cmd="strike" type="button"><s>S</s></button>
+        <button class="tbtn" data-cmd="superscript" type="button">X²</button>
+        <button class="tbtn" data-cmd="subscript" type="button">X₂</button>
+      </div>
+      <div class="detail-row">
+        <label for="detailColor">颜色</label>
+        <input id="detailColor" class="color-input" type="color" value="#000000" title="字体颜色">
+        <span class="mini-label">高亮</span>
+        <input id="detailHighlight" class="color-input" type="color" value="#ffff00" title="突出显示颜色">
+        <button class="tbtn" data-cmd="clearFormat" type="button">清除格式</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>段落</h3>
+      <div class="detail-buttons">
+        <button class="tbtn" data-cmd="alignLeft" type="button">左对齐</button>
+        <button class="tbtn" data-cmd="alignCenter" type="button">居中</button>
+        <button class="tbtn" data-cmd="alignRight" type="button">右对齐</button>
+        <button class="tbtn" data-cmd="alignJustify" type="button">两端</button>
+      </div>
+      <div class="detail-buttons">
+        <button class="tbtn" data-cmd="bulletList" type="button">项目符号</button>
+        <button class="tbtn" data-cmd="orderedList" type="button">编号</button>
+        <button class="tbtn" data-cmd="outdent" type="button">减少缩进</button>
+        <button class="tbtn" data-cmd="indent" type="button">增加缩进</button>
+      </div>
+      <div class="detail-row">
+        <label for="detailLineHeight">行距</label>
+        <select id="detailLineHeight" class="select">
+          <option value="">默认</option>
+          <option value="1">1 倍</option>
+          <option value="1.15">1.15 倍</option>
+          <option value="1.25">1.25 倍</option>
+          <option value="1.5">1.5 倍</option>
+          <option value="1.75">1.75 倍</option>
+          <option value="2">2 倍</option>
+          <option value="2.5">2.5 倍</option>
+          <option value="3">3 倍</option>
+        </select>
+      </div>
+      <div class="detail-row">
+        <label for="detailBefore">段前</label>
+        <input id="detailBefore" class="num-input" type="number" min="0" max="200" step="1" placeholder="0">
+        <label for="detailAfter">段后</label>
+        <input id="detailAfter" class="num-input" type="number" min="0" max="200" step="1" placeholder="0">
+        <span class="unit">磅</span>
+      </div>
+      <button class="tbtn" id="detailOpenParagraph" type="button">段落设置…</button>
+    </section>
+
+    <section>
+      <h3>页面</h3>
+      <div class="detail-row">
+        <label for="detailPageNumber">页码</label>
+        <select id="detailPageNumber" class="select">
+          <option value="none">不显示</option>
+          <option value="screen">仅屏幕</option>
+          <option value="print">显示并打印</option>
+        </select>
+      </div>
+      <button class="tbtn" id="detailOpenPageSetup" type="button">页面设置…</button>
+    </section>
+
+    <section>
+      <h3>编辑</h3>
+      <div class="detail-buttons">
+        <button class="tbtn" id="detailFind" type="button">查找</button>
+        <button class="tbtn" id="detailReplace" type="button">替换</button>
+      </div>
+    </section>
+  </div>
+</aside>
 
 <main id="workspace">
   <div class="paper">

@@ -1911,6 +1911,24 @@ pub fn run() {
                                 results.defaultFormatLabels = false;
                                 results.labelError = String(labelError);
                             }}
+                            // 工具栏单行 + 右下角详细工具侧板
+                            try {{
+                                const homeGroups = Array.from(document.querySelectorAll('#panel-home > .group')).map((el) => el.getBoundingClientRect());
+                                const groupTops = new Set(homeGroups.map((rect) => Math.round(rect.top)));
+                                results.ribbonSingleRow = groupTops.size === 1 &&
+                                    document.querySelector('#ribbon').getBoundingClientRect().height < 220;
+                                document.querySelector('#btnRibbonExpand').click();
+                                await new Promise((resolve) => setTimeout(resolve, 180));
+                                const detailSheet = document.querySelector('#toolDetail');
+                                results.ribbonDetail = !detailSheet.hidden &&
+                                    detailSheet.getBoundingClientRect().top >=
+                                        document.querySelector('#ribbon').getBoundingClientRect().bottom - 1;
+                                document.querySelector('#btnToolDetailClose').click();
+                            }} catch (ribbonError) {{
+                                results.ribbonSingleRow = false;
+                                results.ribbonDetail = false;
+                                results.ribbonError = String(ribbonError);
+                            }}
                             try {{
                                 await window.wordlite.file.setPrintingMode(true);
                                 await window.wordlite.file.setPrintingMode(false);

@@ -161,10 +161,13 @@ body.file-drag-over::after {
 .panel {
   display: none;
   align-items: stretch;
-  flex-wrap: wrap;
+  /* 工具栏永远不换行：窗口窄了先压缩分组，压到最小后由右下角的展开按钮兜底 */
+  flex-wrap: nowrap;
   gap: 4px 0;
-  padding: 8px 8px 4px;
+  padding: 8px 44px 4px 8px;
   min-height: 124px;
+  overflow: hidden;
+  position: relative;
 }
 
 .panel.active { display: flex; animation: panel-in 0.16s ease; }
@@ -187,7 +190,17 @@ body.file-drag-over::after {
   flex-direction: column;
   padding: 0 12px;
   position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
+
+/* 各分组的最小宽度：压到这里就不再缩，剩下的交给“详细工具”面板 */
+.group-clipboard { min-width: 110px; }
+.group-font { min-width: 340px; }
+.group-paragraph { min-width: 170px; }
+.group-page { min-width: 100px; }
+.group-edit { min-width: 70px; }
 
 /* 分组之间的竖线：上下留白，看起来更轻 */
 .group + .group::before {
@@ -216,6 +229,72 @@ body.file-drag-over::after {
   justify-content: center;
   gap: 5px;
   flex: 1;
+  min-width: 0;
+}
+
+/* 工具栏被压缩时右下角的小入口 */
+.ribbon-expand {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  z-index: 6;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: #fff;
+  color: #6b7280;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  cursor: pointer;
+}
+
+.ribbon-expand:hover { background: var(--hover-bg); color: var(--text); }
+.ribbon-expand.active { color: var(--accent); border-color: var(--accent); background: var(--active-bg); }
+
+/* 详细工具栏（非模态侧板）：工具栏压到最小宽度时，所有常用控件仍能从这里操作 */
+.tool-detail {
+  position: fixed;
+  right: 0;
+  bottom: 28px;
+  z-index: 25;
+  width: 340px;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-left: 1px solid var(--border-strong);
+  box-shadow: -8px 0 24px rgba(16, 24, 40, 0.12);
+}
+
+.tool-detail[hidden] { display: none !important; }
+
+.tool-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.tool-detail-head h2 { font-size: 14px; font-weight: 600; }
+.tool-detail-body { padding: 10px 14px 16px; overflow: auto; min-height: 0; }
+.tool-detail section + section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.tool-detail h3 { font-size: 12px; color: var(--accent); margin-bottom: 8px; }
+.detail-row { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; min-width: 0; }
+.detail-row > label { width: 34px; flex: none; font-size: 12px; color: #4b5563; }
+.detail-row .select { flex: 1; max-width: none; min-width: 0; }
+.detail-row .num-input { width: 64px; }
+.detail-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 7px; }
+.detail-buttons .tbtn { padding: 3px 8px; min-height: 26px; font-size: 12px; }
+.detail-buttons .color-input { width: 34px; height: 26px; }
+.detail-note { font-size: 11.5px; color: var(--text-dim); line-height: 1.6; margin-bottom: 8px; }
+
+@media print {
+  .tool-detail, .ribbon-expand { display: none !important; }
 }
 
 .row { display: flex; align-items: center; gap: 3px; }

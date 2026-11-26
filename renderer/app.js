@@ -30,7 +30,8 @@ import {
   WordTableView,
   WordTableCell,
   WordTableHeader,
-  StrikeWithShortcut
+  StrikeWithShortcut,
+  normalizeHexColor
 } from './extensions.js'
 import { docxBase64ToJSON, jsonToDocxBase64 } from './docx.js'
 import { Pagination, createPaginator, PAGE_GAP_DEFAULT } from './pagination.js'
@@ -517,6 +518,15 @@ SIZES.forEach((s) => fontSizeSel.add(new Option(s, s)))
 fontSizeSel.add(new Option('字号：默认', ''), 0)
 fontSizeSel.value = ''
 
+const detailFontSel = document.querySelector('#detailFont')
+const detailFontSizeSel = document.querySelector('#detailFontSize')
+FONTS.forEach((f) => detailFontSel.add(new Option(f.label, f.value)))
+detailFontSel.add(new Option('默认', ''), 0)
+detailFontSel.value = ''
+SIZES.forEach((s) => detailFontSizeSel.add(new Option(s, s)))
+detailFontSizeSel.add(new Option('默认', ''), 0)
+detailFontSizeSel.value = ''
+
 // 中文字号名只在常用磅值上标；没有对应名称就直接写磅
 const SIZE_NAMES = {
   9: '小五', 10.5: '五号', 12: '小四', 14: '四号', 16: '三号',
@@ -525,9 +535,12 @@ const SIZE_NAMES = {
 
 function updateDefaultFormatLabels () {
   const font = FONTS.find((item) => item.value === settings.fontFamily) || FONTS[0]
-  fontFamilySel.options[0].textContent = `字体：${font.label}（默认）`
   const sizeName = SIZE_NAMES[Number(settings.fontSize)]
-  fontSizeSel.options[0].textContent = `字号：${sizeName ? sizeName : `${settings.fontSize} 磅`}（默认）`
+  const sizeLabel = sizeName ? sizeName : `${settings.fontSize} 磅`
+  fontFamilySel.options[0].textContent = `字体：${font.label}（默认）`
+  fontSizeSel.options[0].textContent = `字号：${sizeLabel}（默认）`
+  if (detailFontSel.options[0]) detailFontSel.options[0].textContent = `默认（${font.label}）`
+  if (detailFontSizeSel.options[0]) detailFontSizeSel.options[0].textContent = `默认（${sizeLabel}）`
 }
 
 updateDefaultFormatLabels()
@@ -763,6 +776,121 @@ document.querySelector('#pageSetupForm').addEventListener('submit', (event) => {
   pageSetupDialog.close()
 })
 
+/* ---------------- 详细工具栏侧板 ---------------- */
+
+const toolDetailEl = document.querySelector('#toolDetail')
+const btnRibbonExpand = document.querySelector('#btnRibbonExpand')
+const detailLineHeightSel = document.querySelector('#detailLineHeight')
+const detailBeforeInput = document.querySelector('#detailBefore')
+const detailAfterInput = document.querySelector('#detailAfter')
+const detailPageNumberSel = document.querySelector('#detailPageNumber')
+const detailBlockSel = document.querySelector('#detailBlock')
+const detailColorInput = document.querySelector('#detailColor')
+const detailHighlightInput = document.querySelector('#detailHighlight')
+
+function positionToolDetail () {
+  if (!toolDetailEl || toolDetailEl.hidden) return
+  const ribbon = document.querySelector('#ribbon').getBoundingClientRect()
+  toolDetailEl.style.top = `${ribbon.bottom}px`
+}
+
+function syncDetailControls () {
+  if (!toolDetailEl || toolDetailEl.hidden) return
+  const textStyle = editor.getAttributes('textStyle')
+  detailFontSel.value = textStyle.fontFamily || ''
+  detailFontSizeSel.value = textStyle.fontSize ? textStyle.fontSize.replace('pt', '') : ''
+  const block = currentBlockAttributes()
+  const lineHeight = block.lineHeight == null ? '' : String(block.lineHeight)
+  const exact = /^([\d.]+)pt$/i.exec(lineHeight)
+  syncDynamicOption(
+    detailLineHeightSel,
+    lineHeight,
+    exact ? `固定值 ${Number(exact[1])} 磅` : `${lineHeight} 倍`
+  )
+  if (editor.isActive('heading', { level: 1 })) detailBlockSel.value = 'h1'
+  else if (editor.isActive('heading', { level: 2 })) detailBlockSel.value = 'h2'
+  else if (editor.isActive('heading', { level: 3 })) detailBlockSel.value = 'h3'
+  else detailBlockSel.value = 'paragraph'
+  detailBeforeInput.value = Number.isFinite(block.spacingBefore) ? block.spacingBefore : ''
+  detailAfterInput.value = Number.isFinite(block.spacingAfter) ? block.spacingAfter : ''
+  detailPageNumberSel.value = pageSetup.pageNumber
+  detailColorInput.value = normalizeHexColor(textStyle.color) || '#000000'
+  detailHighlightInput.value = normalizeHexColor(editor.getAttributes('highlight').color) || '#ffff00'
+}
+
+function openToolDetail () {
+  toolDetailEl.hidden = false
+  btnRibbonExpand.classList.add('active')
+  btnRibbonExpand.setAttribute('aria-expanded', 'true')
+  positionToolDetail()
+  syncDetailControls()
+}
+
+function closeToolDetail () {
+  toolDetailEl.hidden = true
+  btnRibbonExpand.classList.remove('active')
+  btnRibbonExpand.setAttribute('aria-expanded', 'false')
+}
+
+btnRibbonExpand.addEventListener('click', () => {
+  if (toolDetailEl.hidden) openToolDetail()
+  else closeToolDetail()
+})
+document.querySelector('#btnToolDetailClose').addEventListener('click', closeToolDetail)
+window.addEventListener('resize', positionToolDetail)
+new ResizeObserver(positionToolDetail).observe(document.querySelector('#ribbon'))
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || toolDetailEl.hidden) return
+  if (document.querySelector('dialog[open]')) return
+  closeToolDetail()
+})
+
+detailFontSel.addEventListener('change', () => {
+  const chain = editor.chain().focus()
+  if (detailFontSel.value) chain.setFontFamily(detailFontSel.value)
+  else chain.unsetFontFamily()
+  chain.run()
+})
+detailFontSizeSel.addEventListener('change', () => {
+  const chain = editor.chain().focus()
+  if (detailFontSizeSel.value) chain.setFontSize(`${detailFontSizeSel.value}pt`)
+  else chain.unsetFontSize()
+  chain.run()
+})
+detailBlockSel.addEventListener('change', () => {
+  const chain = editor.chain().focus()
+  if (detailBlockSel.value === 'paragraph') chain.setParagraph()
+  else chain.setHeading({ level: Number(detailBlockSel.value.slice(1)) })
+  chain.run()
+})
+detailLineHeightSel.addEventListener('change', () => {
+  editor.chain().focus().setLineHeight(detailLineHeightSel.value || null).run()
+})
+detailBeforeInput.addEventListener('change', () => {
+  editor.chain().focus().setBlockSpacing({
+    spacingBefore: detailBeforeInput.value === '' ? null : detailBeforeInput.value
+  }).run()
+})
+detailAfterInput.addEventListener('change', () => {
+  editor.chain().focus().setBlockSpacing({
+    spacingAfter: detailAfterInput.value === '' ? null : detailAfterInput.value
+  }).run()
+})
+detailPageNumberSel.addEventListener('change', () => {
+  setPageSetup({ pageNumber: detailPageNumberSel.value })
+})
+detailColorInput.addEventListener('change', () => {
+  editor.chain().focus().setColor(detailColorInput.value).run()
+})
+detailHighlightInput.addEventListener('change', () => {
+  editor.chain().focus().setHighlight({ color: detailHighlightInput.value }).run()
+})
+document.querySelector('#detailOpenParagraph').addEventListener('click', openParagraphDialog)
+document.querySelector('#detailOpenPageSetup').addEventListener('click', openPageSetupDialog)
+document.querySelector('#detailFind').addEventListener('click', () => document.querySelector('#btnFind').click())
+document.querySelector('#detailReplace').addEventListener('click', () => document.querySelector('#btnReplace').click())
+
 /* ---------------- 工具按钮 ---------------- */
 
 // chain 级命令映射
@@ -794,9 +922,8 @@ document.querySelectorAll('.tbtn[title], .select[title]').forEach((el) => {
   el.setAttribute('aria-label', el.title)
 })
 
-document.querySelector('#ribbon').addEventListener('click', (e) => {
-  const btn = e.target.closest('.tbtn')
-  if (!btn || btn.id === 'btnFontColor' || btn.id === 'btnHighlight') return
+function runCommandButton (btn) {
+  if (!btn) return
   const cmd = btn.dataset.cmd
   if (!cmd) return
 
@@ -850,6 +977,18 @@ document.querySelector('#ribbon').addEventListener('click', (e) => {
     openImageEditor(imagePosFromSelection())
   }
   syncToolbar()
+}
+
+document.querySelector('#ribbon').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tbtn')
+  if (!btn || btn.id === 'btnFontColor' || btn.id === 'btnHighlight') return
+  runCommandButton(btn)
+})
+
+document.querySelector('#toolDetail').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tbtn')
+  if (!btn) return
+  runCommandButton(btn)
 })
 
 function insertPageBreak () {
@@ -3085,11 +3224,10 @@ function localizeShortcuts () {
 
 function syncToolbar () {
   const setActive = (cmd, active) => {
-    const el = document.querySelector(`[data-cmd="${cmd}"]`)
-    if (el) {
+    document.querySelectorAll(`[data-cmd="${cmd}"]`).forEach((el) => {
       el.classList.toggle('active', !!active)
       el.setAttribute('aria-pressed', String(!!active))
-    }
+    })
   }
 
   setActive('bold', editor.isActive('bold'))
@@ -3145,6 +3283,8 @@ function syncToolbar () {
   document.querySelectorAll('[data-image-control]').forEach((control) => {
     control.disabled = !inImage
   })
+
+  syncDetailControls()
 }
 
 /* ---------------- 页面设置 ---------------- */
