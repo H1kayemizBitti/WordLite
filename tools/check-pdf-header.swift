@@ -43,6 +43,10 @@ for index in 0..<document.pageCount {
     if !compact.contains("—\(page)—") {
         problems.append("第 \(page) 页缺少页码（期望 — \(page) —）")
     }
+    if let box = document.page(at: index)?.bounds(for: .mediaBox),
+       abs(box.width - 595.28) > 1 || abs(box.height - 841.89) > 1 {
+        problems.append("第 \(page) 页不是 A4（\(Int(box.width))×\(Int(box.height))pt）")
+    }
 }
 
 // 显式纸张自测样张是 120 段带编号的正文；逐段核对，防止页底内容被裁掉。

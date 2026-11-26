@@ -80,8 +80,8 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 | Tables | Insert, drag column widths, merge / split cells, cell shading, border width and color |
 | Images | Insert, drag to move, precise resize, left / center / right align, text wrapping (square / top-and-bottom), visual crop, side panel with live preview and one-step undo, full-size viewer, replace, delete |
 | Page | A4 screen pagination (line-level breaks, headings kept with the next paragraph, tables / images kept intact), continuous reading (double-click the page gap), paper size, orientation, custom margins, paper color, three page-number modes (off / screen only / screen + print), header and footer, line/block breaking, page setup, manual page breaks |
-| Interface | Single-row toolbar; bottom-right detailed tools panel (docked on wide windows, floating on narrow ones); actual default labels for font and size; page count and continuous-reading status |
-| Output | Print (Ctrl+P opens the system print dialog directly, where you set page range, copies and preview), export to PDF; screen / print preview / PDF share the same pagination breaks; closing the document window is blocked while the print panel is open |
+| Interface | Single-row toolbar; always-visible undo / redo in the tab bar; bottom-right detailed tools panel (docked on wide windows, floating on narrow ones); actual default labels for font and size; page count and continuous-reading status |
+| Output | Print (Ctrl+P opens the system print dialog directly, where you set page range, copies and preview), export to PDF; screen / print preview / PDF share the same pagination breaks; macOS PDF export writes header / footer / page numbers per page; closing the document window is blocked while the print panel is open |
 
 <details>
 <summary><b>Keyboard shortcuts</b> (also available in the app with <kbd>F1</kbd>, or <kbd>⌘?</kbd> on macOS)</summary>
@@ -90,6 +90,7 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 | --- | --- | --- |
 | New / Open / Save / Save as | <kbd>Ctrl+N</kbd> / <kbd>Ctrl+O</kbd> / <kbd>Ctrl+S</kbd> / <kbd>Ctrl+Shift+S</kbd> | <kbd>⌘N</kbd> / <kbd>⌘O</kbd> / <kbd>⌘S</kbd> / <kbd>⇧⌘S</kbd> |
 | Print | <kbd>Ctrl+P</kbd> | <kbd>⌘P</kbd> |
+| Undo / Redo | <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd> | <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> |
 | Find / Replace | <kbd>Ctrl+F</kbd> / <kbd>Ctrl+H</kbd> | <kbd>⌘F</kbd> / <kbd>⌥⌘F</kbd> |
 | Context menu | <kbd>Shift+F10</kbd> or the Menu key | <kbd>⇧F10</kbd> |
 | Bold / Italic / Underline | <kbd>Ctrl+B</kbd> / <kbd>Ctrl+I</kbd> / <kbd>Ctrl+U</kbd> | <kbd>⌘B</kbd> / <kbd>⌘I</kbd> / <kbd>⌘U</kbd> |
@@ -200,7 +201,7 @@ docs/                   README screenshot and migration notes
 - Packaged and tested on Windows 10 / 11 and macOS 13 Ventura or later (the v1.2.0 Universal build passed three self-test suites on macOS CI; Intel hardware has not been re-tested, and older macOS versions are untested)
 - Choosing Quit from the Dock icon's context menu, logging out or shutting down exits without a save prompt; unsaved work is recovered from autosave when you reopen the app
 - The macOS build is ad-hoc signed and not notarized, so the first launch needs the steps under "Download"; the Windows build is not code-signed either
-- On macOS, pagination, continuous reading, paragraphs and PDF page counts pass CI; the physical print panel and the actual position of @page header/footer/page numbers have not been visually checked on a physical Mac
+- On macOS, pagination, continuous reading, paragraphs and PDF page counts pass CI; macOS PDF export is also checked in CI with PDFKit for header/footer/page numbers and for every paragraph of a 120-paragraph sample, so no page-bottom content is dropped (the physical print panel and the position of content on actual paper have not been visually checked on a physical Mac)
 - Text boxes, nested tables and complex fields are simplified on DOCX import
 - DOCX import restores only direct run formatting: `w:color` text colour, `w:highlight` highlighter and run-level `w:shd` character shading. Theme colours use the cached value in `w:color/@w:val` (a theme colour with no cached value is not restored); colours defined in character or paragraph styles and paragraph shading are not restored. When a run cannot be aligned with confidence it is left uncoloured, so colour never lands on the wrong characters
 - Image text wrapping supports inline, square (left / right) and top-and-bottom; tight, through, behind-text and in-front-of-text wrapping is simplified on import with a warning

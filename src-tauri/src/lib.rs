@@ -891,6 +891,16 @@ fn print_document(window: tauri::WebviewWindow) -> Result<(), String> {
     }
 }
 
+// 屏幕分页捕获：每个页面一个矩形（Web 页面坐标，单位 CSS px/point）
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PageMetrics {
@@ -1035,6 +1045,170 @@ async fn export_pdf(
     }
     print_to_pdf_file(&window, &file_path, &page)?;
     Ok(serde_json::json!({ "saved": true, "path": file_path }))
+}
+
+// Mac 导出：按屏幕分页逐页 createPDF（屏幕媒体，不走打印排版），再用 PDFKit 合并。
+// 这样页眉页脚、正文行距和页码都和屏幕完全一致，也不会被 WKWebView 的打印重排裁掉。
+#[cfg(target_os = "macos")]
+fn capture_pdf_pages(
+    window: &tauri::WebviewWindow,
+    rects: &[CaptureRect],
+) -> Result<Vec<Vec<u8>>, String> {
+    use block2::RcBlock;
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_foundation::{NSData, NSError};
+    use objc2_web_kit::{WKPDFConfiguration, WKWebView};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let mut pages = Vec::with_capacity(rects.len());
+    for rect in rects {
+        let (tx, rx) = mpsc::channel::<Result<Vec<u8>, String>>();
+        let target = CGRect::new(
+            CGPoint::new(rect.x, rect.y),
+            CGSize::new(rect.width, rect.height),
+        );
+        window
+            .with_webview(move |webview| {
+                let ptr = webview.inner();
+                if ptr.is_null() {
+                    let _ = tx.send(Err("拿不到 WKWebView 句柄".to_string()));
+                    return;
+                }
+                let Some(mtm) = objc2::MainThreadMarker::new() else {
+                    let _ = tx.send(Err("不在主线程".to_string()));
+                    return;
+                };
+                let wk: &WKWebView = unsafe { &*(ptr as *const WKWebView) };
+                let config = unsafe { WKPDFConfiguration::new(mtm) };
+                unsafe { config.setRect(target) };
+                let sender = tx.clone();
+                let handler = RcBlock::new(move |data: *mut NSData, error: *mut NSError| {
+                    if !error.is_null() {
+                        let _ = sender.send(Err("WKWebView 生成 PDF 失败".to_string()));
+                        return;
+                    }
+                    if data.is_null() {
+                        let _ = sender.send(Err("WKWebView 返回空 PDF".to_string()));
+                        return;
+                    }
+                    let bytes = unsafe { (*data).to_vec() };
+                    let _ = sender.send(Ok(bytes));
+                });
+                unsafe {
+                    wk.createPDFWithConfiguration_completionHandler(Some(&config), &handler);
+                }
+                // API 异步回调；让配置和 block 活到回调完成
+                std::mem::forget(handler);
+                std::mem::forget(config);
+            })
+            .map_err(|e| format!("访问 webview 失败：{e}"))?;
+        pages.push(
+            rx.recv_timeout(Duration::from_secs(30))
+                .map_err(|_| "等待 PDF 页面超时".to_string())??,
+        );
+    }
+    Ok(pages)
+}
+
+#[cfg(target_os = "macos")]
+fn merge_pdf_pages(pages: &[Vec<u8>], file_path: &str) -> Result<(), String> {
+    use objc2::ClassType;
+    use objc2_foundation::{NSData, NSString, NSURL};
+    use objc2_pdf_kit::PDFDocument;
+
+    let _ = std::fs::remove_file(file_path);
+    let merged = unsafe { PDFDocument::new() };
+    for bytes in pages {
+        let data = NSData::with_bytes(bytes);
+        let doc = unsafe { PDFDocument::initWithData(PDFDocument::alloc(), &data) }
+            .ok_or_else(|| "PDFKit 打不开单页 PDF".to_string())?;
+        let count = unsafe { doc.pageCount() };
+        for index in 0..count {
+            let page = unsafe { doc.pageAtIndex(index) }
+                .ok_or_else(|| "PDFKit 页面为空".to_string())?;
+            let target = unsafe { merged.pageCount() };
+            unsafe { merged.insertPage_atIndex(&page, target) };
+        }
+    }
+    let url = NSURL::fileURLWithPath(&NSString::from_str(file_path));
+    if unsafe { merged.writeToURL(&url) } {
+        Ok(())
+    } else {
+        Err("PDFKit 写入失败".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command(rename_all = "camelCase")]
+async fn export_pdf_capture(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    default_path: String,
+    rects: Vec<CaptureRect>,
+    target_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if rects.is_empty() {
+        return Err("没有可导出的页面".to_string());
+    }
+    let file_path = match target_path {
+        Some(path) if !path.trim().is_empty() => {
+            let mut path = path;
+            if !path.to_ascii_lowercase().ends_with(".pdf") {
+                path.push_str(".pdf");
+            }
+            path
+        }
+        _ => {
+            let requested = PathBuf::from(&default_path);
+            let mut builder = app.dialog().file().set_title("导出 PDF").set_parent(&window);
+            if requested.is_absolute() {
+                if let Some(directory) = requested.parent() {
+                    builder = builder.set_directory(directory);
+                }
+                if let Some(name) = requested.file_name() {
+                    builder = builder.set_file_name(name.to_string_lossy().to_string());
+                }
+            } else if let Ok(directory) = app.path().document_dir() {
+                builder = builder.set_directory(directory);
+                builder = builder.set_file_name(requested.to_string_lossy().to_string());
+            }
+            builder = builder.add_filter("PDF 文档", &["pdf"]);
+            let Some(chosen) = builder.blocking_save_file() else {
+                return Ok(serde_json::json!({ "saved": false }));
+            };
+            let mut path = chosen.to_string();
+            if !path.to_ascii_lowercase().ends_with(".pdf") {
+                path.push_str(".pdf");
+            }
+            path
+        }
+    };
+
+    let pages = capture_pdf_pages(&window, &rects)?;
+    let page_count = pages.len();
+    let merge_path = file_path.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(merge_pdf_pages(&pages, &merge_path));
+    })
+    .map_err(|e| e.to_string())?;
+    rx.recv_timeout(std::time::Duration::from_secs(60))
+        .map_err(|_| "合并 PDF 超时".to_string())??;
+    Ok(serde_json::json!({ "saved": true, "path": file_path, "pages": page_count }))
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command(rename_all = "camelCase")]
+async fn export_pdf_capture(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    default_path: String,
+    rects: Vec<CaptureRect>,
+    target_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let _ = (window, app, default_path, rects, target_path);
+    Err("当前平台不支持屏幕捕获导出".to_string())
 }
 
 // 只读尾部 1KB 找 %%EOF：CoreGraphics 逐页写盘，多页文档中途停顿时不能只看大小不变
@@ -2513,11 +2687,11 @@ pub fn run() {
                                 results.viewerOk = false;
                                 results.viewerError = String(viewerError);
                             }}
-                            // Mac 显式纸张：PDF 每页都要有页眉/页脚/页码，且页数和屏幕一致
+                            // Mac 屏幕分页 PDF：每页带页眉/页脚/页码，且页数和屏幕一致
                             try {{
                                 if (window.wordlite.platform === 'mac') {{
-                                    const explicitPrint = window.__wordliteExplicitPrint;
-                                    if (!explicitPrint) throw new Error('缺少 __wordliteExplicitPrint');
+                                    const captureApi = window.__wordlitePdfCapture;
+                                    if (!captureApi) throw new Error('缺少 __wordlitePdfCapture');
                                     document.querySelector('#btnPageSetup').click();
                                     await new Promise((resolve) => setTimeout(resolve, 120));
                                     const setSetup = (selector, value, eventName = 'change') => {{
@@ -2546,24 +2720,29 @@ pub fn run() {
                                         }}
                                         await new Promise((resolve) => setTimeout(resolve, 100));
                                     }}
-                                    const state = explicitPrint.build();
-                                    const pages = document.querySelectorAll('#printRoot .print-page');
-                                    const first = pages[0];
-                                    results.explicitPrintPages = pages.length;
-                                    results.explicitPrintFurniture = !!first &&
-                                        !!first.querySelector('.page-sheet-header') &&
-                                        !!first.querySelector('.page-sheet-footer-text') &&
-                                        !!first.querySelector('.page-sheet-footer-number') &&
-                                        first.querySelector('.page-sheet-header').textContent === '简写 WordLite' &&
-                                        first.querySelector('.page-sheet-footer-text').textContent === '内部资料' &&
-                                        first.querySelector('.page-sheet-footer-number').textContent === '— 1 —';
-                                    const explicitPdf = await withTimeout(window.wordlite.file.printToPDF(), 40000);
-                                    results.explicitPdfPages = (atob(explicitPdf).match(/\/Type\s*\/Page[^s]/g) || []).length;
-                                    results.explicitPdfMatchesScreen = screenPages > 0 &&
-                                        results.explicitPdfPages === screenPages &&
-                                        results.explicitPrintPages === screenPages;
-                                    await window.wordlite.file.writeFile({explicit_pdf}, explicitPdf, true);
-                                    explicitPrint.finish(state);
+                                    let capture = null;
+                                    try {{
+                                        capture = captureApi.prepare();
+                                        const first = document.querySelector('.page-layer .page-sheet');
+                                        results.explicitPrintPages = capture?.rects?.length || 0;
+                                        results.explicitPrintFurniture = !!first &&
+                                            !!first.querySelector('.page-sheet-header') &&
+                                            !!first.querySelector('.page-sheet-footer-text') &&
+                                            !!first.querySelector('.page-sheet-footer-number') &&
+                                            first.querySelector('.page-sheet-header').textContent === '简写 WordLite' &&
+                                            first.querySelector('.page-sheet-footer-text').textContent === '内部资料' &&
+                                            first.querySelector('.page-sheet-footer-number').textContent === '— 1 —';
+                                        const exported = await withTimeout(
+                                            window.wordlite.file.exportPdfCapture('explicit.pdf', capture.rects, {explicit_pdf}),
+                                            60000
+                                        );
+                                        results.explicitPdfPages = exported?.pages;
+                                        results.explicitPdfMatchesScreen = screenPages > 0 &&
+                                            results.explicitPdfPages === screenPages &&
+                                            results.explicitPrintPages === screenPages;
+                                    }} finally {{
+                                        captureApi.finish(capture);
+                                    }}
                                     await new Promise((resolve) => setTimeout(resolve, 300));
                                     results.explicitPrintOk = results.explicitPrintPages > 1 &&
                                         results.explicitPrintFurniture && results.explicitPdfMatchesScreen;
@@ -2664,6 +2843,7 @@ pub fn run() {
             print_document,
             print_to_pdf,
             export_pdf,
+            export_pdf_capture,
             set_ime_composing,
             selftest_ready,
             selftest_report

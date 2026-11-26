@@ -52,6 +52,9 @@
     // 打印面板打开期间由 Rust 挡住窗口关闭；渲染层用这个标志告诉原生层
     setPrintingMode: (printing) => invoke('set_printing_mode', { printing }),
     exportPdf: (defaultPath) => invoke('export_pdf', { defaultPath, page: pageMetrics() }),
+    // Mac：屏幕分页逐页 createPDF + PDFKit 合并（页眉页脚和正文不经过打印排版）
+    exportPdfCapture: (defaultPath, rects, targetPath) =>
+      invoke('export_pdf_capture', { defaultPath, rects, targetPath }),
     printToPDF: () => invoke('print_to_pdf', { page: pageMetrics() }),
     onSaveBeforeClose: (callback) => {
       currentWindow?.listen?.('save-before-close', () => callback())

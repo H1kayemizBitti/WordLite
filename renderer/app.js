@@ -3971,6 +3971,8 @@ function showStatus (message, duration = 5000) {
 }
 
 function updateDocumentState () {
+  // HTML title 决定 PDF 元数据里的标题；窗口标题由 Rust 端单独设置
+  document.title = `${currentFileName} - 简写`
   fileApi.setDocumentState(dirty, currentFileName)
 }
 
@@ -4955,174 +4957,71 @@ async function clearPrintFocus () {
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
 }
 
-/* ---------------- Mac 导出 PDF：显式纸张 ----------------
-   WKWebView 的打印引擎不认 @page 页边距盒子（@top-center / @bottom-right），
-   Windows/WebView2 能正常印出的页眉、页脚、页码在 Mac PDF 里会全部丢掉。
-   这里不跟打印引擎的分页较劲：导出前把屏幕分页复制成一页一个固定尺寸的
-   .print-page，页眉页脚页码是每页里的真实 DOM，打印引擎只负责把每张纸画出来。 */
+/* ---------------- Mac 导出 PDF：屏幕分页捕获 ----------------
+   WKWebView 的打印排版会重新排正文（每页末尾会少几段），@page 页边距盒子也不生效。
+   导出时把屏幕上的纸张整体缩到 A4 点数（96 CSS px/inch → 72 pt/inch），
+   逐页 createPDF（屏幕媒体，不重排），最后用 PDFKit 合并成一份 PDF。 */
 
-function firstTextTop (root) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  const range = document.createRange()
-  let node
-  while ((node = walker.nextNode())) {
-    if (!node.nodeValue || !node.nodeValue.trim()) continue
-    range.selectNodeContents(node)
-    const rect = range.getClientRects()[0]
-    if (rect && rect.height > 0) return rect.top
-  }
-  return null
-}
+const PDF_CAPTURE_SCALE = 0.75
 
-function buildExplicitPrintPages () {
-  const root = document.querySelector('#printRoot')
+function beginPdfCapture () {
+  if (!isMac) return null
   const paper = document.querySelector('.paper')
-  const editorDom = editor.view.dom
-  const styleEl = document.querySelector('#printPageStyle')
-  if (!root || !paper || !editorDom || !styleEl) return null
+  const scaler = document.querySelector('#paperScaler')
+  if (!paper || !scaler) return null
 
-  // 连续阅读时页层是空的，临时按分页模式渲染一次，导出完再恢复
+  // 连续阅读时页层是空的；临时切回分页纸张，导完再恢复
   const wasReading = pageGapCollapsed
   if (wasReading) {
     pageGapCollapsed = false
     paginator.runNow()
   }
+  paginator.runNow()
 
-  const dimensions = pageDimensions()
-  const geom = { ...paginationGeometry(), gap: pageGapCollapsed ? 0 : PAGE_GAP_DEFAULT }
-  const pageCount = paginator.getPageCount()
-  const sheets = Array.from(document.querySelectorAll('.page-layer .page-sheet'))
-  const scale = renderedZoom / 100 || 1
-  const paperRect = paper.getBoundingClientRect()
-  const editorRect = editorDom.getBoundingClientRect()
-  // 正文第一行的排版坐标（相对纸张顶），换算掉屏幕缩放
-  const editorOffset = (editorRect.top - paperRect.top) / scale
-  // 用实测正文宽度，而不是按厘米反算：差 0.01px 也可能让克隆正文换行和屏幕不一致
-  const contentWidth = Math.max(24, editorRect.width / scale)
-  const contentHeight = Math.max(24, geom.pageHeight - geom.marginTop - geom.marginBottom)
-  const pitch = geom.pageHeight + geom.gap
-  const liveGaps = Array.from(editorDom.querySelectorAll('.page-gap-widget'))
-  const fragment = document.createDocumentFragment()
-  const contents = []
-
-  for (let i = 0; i < pageCount; i += 1) {
-    const page = document.createElement('div')
-    page.className = 'print-page'
-    page.style.width = `${geom.pageWidth.toFixed(2)}px`
-    // 比纸张矮 0.5px：打印引擎按页高取整时，正好满高的块容易被挤出一张空白页
-    page.style.height = `${Math.max(1, geom.pageHeight - 0.5).toFixed(2)}px`
-
-    // 页眉/页脚/页码直接克隆屏幕纸张，样式和位置与屏幕完全一致
-    if (sheets[i]) {
-      const furniture = sheets[i].cloneNode(true)
-      furniture.classList.add('print-furniture')
-      // 页码模式是「仅屏幕」时，打印/PDF 里不该出现页码
-      if (pageSetup.pageNumber !== 'print') {
-        furniture.querySelectorAll('.page-sheet-page-number').forEach((el) => el.remove())
-      }
-      page.appendChild(furniture)
-    }
-
-    const body = document.createElement('div')
-    body.className = 'print-page-body'
-    body.style.left = `${geom.marginLeft.toFixed(2)}px`
-    body.style.top = `${geom.marginTop.toFixed(2)}px`
-    body.style.width = `${contentWidth}px`
-    body.style.height = `${contentHeight.toFixed(2)}px`
-
-    const content = document.createElement('div')
-    content.className = 'print-page-content'
-    content.style.width = `${contentWidth}px`
-
-    const clone = editorDom.cloneNode(true)
-    clone.removeAttribute('contenteditable')
-    clone.classList.add('print-clone')
-    clone.style.width = `${contentWidth}px`
-    clone.style.minHeight = '0'
-
-    // 间隔 widget 保留屏幕上的高度，但不再触发分页
-    const cloneGaps = Array.from(clone.querySelectorAll('.page-gap-widget'))
-    for (let g = 0; g < cloneGaps.length; g += 1) {
-      const source = liveGaps[g]
-      const height = source ? source.getBoundingClientRect().height / scale : 0
-      cloneGaps[g].style.setProperty('--wl-gap-height', `${height.toFixed(2)}px`)
-    }
-
-    const offset = editorOffset - geom.marginTop - i * pitch
-    // 用绝对定位的 top 而不是 transform：Chromium/WebKit 的打印分页
-    // 会把带 transform 的绝对定位内容在后续页整体下移，页底内容被裁掉
-    content.style.top = `${offset.toFixed(2)}px`
-    content.appendChild(clone)
-    body.appendChild(content)
-    page.appendChild(body)
-    fragment.appendChild(page)
-    contents.push({ content, clone, offset })
+  document.documentElement.classList.add('pdf-capture')
+  document.body.classList.add('pdf-capture')
+  if (pageSetup.pageNumber !== 'print') {
+    document.body.classList.add('pdf-capture-no-numbers')
   }
 
-  root.replaceChildren(fragment)
-
-  // #printRoot 平时 display:none，量不到克隆正文的真实位置。
-  // 同一帧里临时移到屏幕外显示，量完立刻收回，不会有可见闪动。
-  const measureStyle = {
-    display: root.style.display,
-    position: root.style.position,
-    left: root.style.left,
-    top: root.style.top
-  }
-  root.style.display = 'block'
-  root.style.position = 'absolute'
-  root.style.left = '-200000px'
-  root.style.top = '0'
-
-  // 克隆正文在屏幕媒体里可能和原正文差零点几像素（外边距塌陷等），
-  // 用第一行校准一次，所有页一起平移，保证正文和页眉页脚对得上
-  const first = contents[0]
-  const liveFirst = firstTextTop(editorDom)
-  const cloneFirst = first ? firstTextTop(first.clone) : null
-  if (first && liveFirst != null && cloneFirst != null) {
-    const liveTop = (liveFirst - editorRect.top) / scale
-    const cloneTop = cloneFirst - first.clone.getBoundingClientRect().top
-    const shift = liveTop - cloneTop
-    if (Math.abs(shift) > 0.05) {
-      for (const item of contents) {
-        item.content.style.top = `${(item.offset + shift).toFixed(2)}px`
-      }
+  paper.style.transformOrigin = 'top left'
+  paper.style.transform = `scale(${PDF_CAPTURE_SCALE})`
+  scaler.style.width = `${(paper.offsetWidth * PDF_CAPTURE_SCALE).toFixed(2)}px`
+  scaler.style.height = `${(paper.offsetHeight * PDF_CAPTURE_SCALE).toFixed(2)}px`
+  // 先把布局定下来，再量每张纸在文档里的位置
+  void paper.offsetHeight
+  const rects = Array.from(document.querySelectorAll('.page-layer .page-sheet')).map((sheet) => {
+    const rect = sheet.getBoundingClientRect()
+    return {
+      x: rect.left + window.scrollX,
+      y: rect.top + window.scrollY,
+      width: rect.width,
+      height: rect.height
     }
-  }
-
-  root.style.display = measureStyle.display
-  root.style.position = measureStyle.position
-  root.style.left = measureStyle.left
-  root.style.top = measureStyle.top
-
-  // 显式纸张自己带页边距，@page 只留纸张尺寸和 0 边距，不能再画页边距盒子
-  styleEl.textContent =
-    `@page { size: ${dimensions.width}cm ${dimensions.height}cm; margin: 0; }`
-  document.body.classList.add('print-explicit')
-  explicitPrintActive = true
-  return { wasReading }
+  })
+  return { wasReading, rects }
 }
 
-function finishExplicitPrintPages (state) {
-  explicitPrintActive = false
+function finishPdfCapture (state) {
   if (!state) return
-  document.body.classList.remove('print-explicit')
-  document.querySelector('#printRoot')?.replaceChildren()
-  const styleEl = document.querySelector('#printPageStyle')
-  if (styleEl) styleEl.textContent = buildPrintPageStyle(pageDimensions(), currentMargins())
+  document.documentElement.classList.remove('pdf-capture')
+  document.body.classList.remove('pdf-capture', 'pdf-capture-no-numbers')
+  const paper = document.querySelector('.paper')
+  if (paper) paper.style.transformOrigin = ''
+  // 恢复用户当前的页面缩放，外层 scaler 也一起恢复
+  renderPageZoom(pageZoom)
   if (pageGapCollapsed !== state.wasReading) {
     pageGapCollapsed = state.wasReading
     paginator.runNow()
   } else {
-    // 打印媒体切回屏幕后重新排一次，页数/页缝立刻恢复
     paginator.force(0)
   }
 }
 
-// 自测入口：让 CI 能单独生成一份带页眉页脚页码的显式纸张 PDF
-window.__wordliteExplicitPrint = {
-  build: () => buildExplicitPrintPages(),
-  finish: (state) => finishExplicitPrintPages(state)
+// 自测入口：让 CI 能单独生成一份带页眉页脚页码的屏幕捕获 PDF
+window.__wordlitePdfCapture = {
+  prepare: () => beginPdfCapture(),
+  finish: (state) => finishPdfCapture(state)
 }
 
 async function exportPdf () {
@@ -5131,15 +5030,17 @@ async function exportPdf () {
   paginator?.runNow()
   await clearPrintFocus()
   const defaultPath = `${currentFileName.replace(/\.[^.]+$/, '')}.pdf`
-  let explicitPages = null
+  let capture = null
   try {
-    if (isMac) explicitPages = buildExplicitPrintPages()
-    const result = await fileApi.exportPdf(defaultPath)
+    if (isMac) capture = beginPdfCapture()
+    const result = capture
+      ? await fileApi.exportPdfCapture(defaultPath, capture.rects, null)
+      : await fileApi.exportPdf(defaultPath)
     if (result?.saved) showStatus(`PDF 已导出：${result.path}`)
   } catch (error) {
     showStatus(`PDF 导出失败：${error.message}`, 0)
   } finally {
-    finishExplicitPrintPages(explicitPages)
+    finishPdfCapture(capture)
     // 导出走完后把焦点还给编辑器（打印面板期间不抢焦点，避免光标重新出现在打印内容里）
     if (editorHadFocus) editor.commands.focus()
   }

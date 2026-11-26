@@ -1657,6 +1657,61 @@ html.cross-page-selection { --wl-selection-color: rgba(0, 0, 0, 0); }
 
 .help-about-meta > span:nth-child(odd) { color: var(--text-dim); }
 
+/* ---------- 屏幕分页 PDF 捕获（Mac 导出用） ---------- */
+
+html.pdf-capture, body.pdf-capture {
+  height: auto !important;
+  overflow: visible !important;
+  background: #fff !important;
+}
+body.pdf-capture { display: block !important; }
+/* 打印遮罩、拖放提示等伪元素不能进 PDF */
+body.pdf-capture::before,
+body.pdf-capture::after { display: none !important; }
+body.pdf-capture #ribbon,
+body.pdf-capture #statusbar,
+body.pdf-capture .find-bar,
+body.pdf-capture .tool-detail,
+body.pdf-capture .popover,
+body.pdf-capture dialog,
+body.pdf-capture #printRoot { display: none !important; }
+body.pdf-capture #workspace {
+  display: block !important;
+  overflow: visible !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #fff !important;
+}
+body.pdf-capture .paper-scaler { margin: 0 !important; }
+body.pdf-capture .paper {
+  margin: 0 !important;
+  box-shadow: none !important;
+  background-image: none !important;
+}
+body.pdf-capture .page-sheet {
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+body.pdf-capture.pdf-capture-no-numbers .page-sheet-page-number { display: none !important; }
+body.pdf-capture .selection-layer,
+body.pdf-capture .ProseMirror-gapcursor { display: none !important; }
+body.pdf-capture .ProseMirror { caret-color: transparent !important; }
+body.pdf-capture .ProseMirror ::selection,
+body.pdf-capture .ProseMirror::selection,
+body.pdf-capture .ProseMirror *::selection {
+  background-color: rgba(0, 0, 0, 0) !important;
+}
+body.pdf-capture .ProseMirror .find-match {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+body.pdf-capture .ProseMirror-selectednode { outline: none !important; }
+body.pdf-capture .ProseMirror [data-resize-handle] { display: none !important; }
+body.pdf-capture .ProseMirror [data-resize-container].in-selection [data-resize-wrapper]::after {
+  display: none !important;
+}
+
 /* ---------- 打印 ---------- */
 
 /* Mac 导出 PDF 用的显式纸张层：屏幕上不占位，只在显式打印模式里显示。
