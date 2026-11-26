@@ -2993,10 +2993,29 @@ const ZOOM_MAX = 400
 // 一档一档走，不做连续缩放：触控板一次手势会连发几十个 wheel 事件
 const ZOOM_STEPS = [10, 25, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400]
 let pageZoom = clamp(storageRead(ZOOM_KEY, 100), ZOOM_MIN, ZOOM_MAX, 100)
+let renderedZoom = 100
+let lastPointer = null
+let pinchAnchor = null
+
+workspaceEl.addEventListener('pointermove', (event) => {
+  lastPointer = { x: event.clientX, y: event.clientY }
+}, { passive: true })
+
+// 缩放跟随鼠标：鼠标停在页面上时以鼠标为中心；否则以工作区中心
+function zoomAnchor () {
+  const rect = workspaceEl.getBoundingClientRect()
+  if (lastPointer &&
+      lastPointer.x >= rect.left && lastPointer.x <= rect.right &&
+      lastPointer.y >= rect.top && lastPointer.y <= rect.bottom) {
+    return lastPointer
+  }
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+}
 
 function renderPageZoom (value) {
   const paper = document.querySelector('.paper')
   if (!paper) return false
+  renderedZoom = value
   paper.style.zoom = value === 100 ? '' : `${value / 100}`
   document.querySelector('#btnZoomReset').textContent = `${value}%`
   document.querySelector('#btnZoomOut').disabled = value <= ZOOM_MIN
@@ -3004,19 +3023,33 @@ function renderPageZoom (value) {
   return true
 }
 
-function applyPageZoom (next) {
+// 以 viewport 上的 anchor 为中心缩放：先记下 anchor 指向的纸面坐标，
+// 改完 zoom 后再把滚动条挪回去，让那个点还在鼠标底下。
+function renderPageZoomAt (value, anchor) {
+  const paper = document.querySelector('.paper')
+  if (!paper) return false
+  const rect = workspaceEl.getBoundingClientRect()
+  const point = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)
+    ? anchor
+    : { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  const before = paper.getBoundingClientRect()
+  const oldScale = renderedZoom / 100
+  const docX = (point.x - before.left) / oldScale
+  const docY = (point.y - before.top) / oldScale
+  if (!renderPageZoom(value)) return false
+  const scale = value / 100
+  const after = paper.getBoundingClientRect()
+  workspaceEl.scrollLeft += after.left + docX * scale - point.x
+  workspaceEl.scrollTop += after.top + docY * scale - point.y
+  return true
+}
+
+function applyPageZoom (next, anchor) {
   const value = clamp(Math.round(Number(next) || 0), ZOOM_MIN, ZOOM_MAX, pageZoom)
-  if (!renderPageZoom(value)) return
-  // 缩放前后尽量停在同一位：按滚动比例还原，放大不会把你顶回文首
-  const keepRatio = workspaceEl.scrollHeight > 0
-    ? workspaceEl.scrollTop / workspaceEl.scrollHeight
-    : 0
+  if (!renderPageZoomAt(value, anchor)) return
   pageZoom = value
   storageWrite(ZOOM_KEY, value)
   requestAnimationFrame(() => {
-    if (keepRatio && workspaceEl.scrollHeight > 0) {
-      workspaceEl.scrollTop = keepRatio * workspaceEl.scrollHeight
-    }
     if (imageEdit) {
       if (inCropMode()) syncCropOverlay()
       else syncImageDim()
@@ -3024,13 +3057,14 @@ function applyPageZoom (next) {
   })
 }
 
-function stepPageZoom (direction) {
+function stepPageZoom (direction, anchor) {
+  const at = anchor || zoomAnchor()
   if (direction > 0) {
     const next = ZOOM_STEPS.find((step) => step > pageZoom)
-    if (next) applyPageZoom(next)
+    if (next) applyPageZoom(next, at)
   } else if (direction < 0) {
     const prev = ZOOM_STEPS.filter((step) => step < pageZoom).pop()
-    if (prev) applyPageZoom(prev)
+    if (prev) applyPageZoom(prev, at)
   }
 }
 
@@ -3052,16 +3086,18 @@ function queuePinchPreview (value) {
   if (pinchFrame) return
   pinchFrame = requestAnimationFrame(() => {
     pinchFrame = 0
-    if (pinchPreviewZoom !== null) renderPageZoom(pinchPreviewZoom)
+    if (pinchPreviewZoom !== null) renderPageZoomAt(pinchPreviewZoom, pinchAnchor)
   })
 }
 
-function beginPinchZoom () {
+function beginPinchZoom (x, y) {
   if (document.querySelector('dialog[open]')) return false
   if (pinchFrame) {
     cancelAnimationFrame(pinchFrame)
     pinchFrame = 0
   }
+  const hasPoint = Number.isFinite(x) && Number.isFinite(y) && (x !== 0 || y !== 0)
+  pinchAnchor = hasPoint ? { x, y } : zoomAnchor()
   pinchBaseZoom = pageZoom
   pinchPreviewZoom = null
   renderPageZoom(pageZoom)
@@ -3084,14 +3120,16 @@ function endPinchZoom () {
     pinchFrame = 0
   }
   const finalZoom = pinchPreviewZoom === null ? pinchBaseZoom : pinchPreviewZoom
+  const anchor = pinchAnchor
   pinchBaseZoom = null
   pinchPreviewZoom = null
-  applyPageZoom(finalZoom)
+  pinchAnchor = null
+  applyPageZoom(finalZoom, anchor)
   return true
 }
 
 window.addEventListener('gesturestart', (event) => {
-  if (!beginPinchZoom()) return
+  if (!beginPinchZoom(event.clientX, event.clientY)) return
   event.preventDefault()
 }, { passive: false, capture: true })
 
@@ -3127,10 +3165,10 @@ function isPinchWheel (event) {
 let wheelZoomTimer = 0
 let wheelZoomTarget = null
 
-window.__wordliteWheelZoom = (delta) => {
+window.__wordliteWheelZoom = (delta, x, y) => {
   if (document.querySelector('dialog[open]')) return false
   if (pinchBaseZoom === null) {
-    if (!beginPinchZoom()) return false
+    if (!beginPinchZoom(x, y)) return false
     wheelZoomTarget = pageZoom
   }
   const factor = Math.pow(1.0018, Number(delta) || 0)
@@ -3161,21 +3199,22 @@ window.addEventListener('wheel', (event) => {
     return
   }
   event.preventDefault()
-  // 捏合是 WebView2 合成的连续 wheel；真 Ctrl+滚轮还是按档位走
+  // 捏合是 WebView2 合成的连续 wheel；真 Ctrl+滚轮还是按档位走。
+  // 合成 delta 的方向和页面缩放相反：捏合（合拢）应该缩小，所以取反。
   if (isPinchWheel(event)) {
-    window.__wordliteWheelZoom(event.deltaY)
+    window.__wordliteWheelZoom(-event.deltaY, event.clientX, event.clientY)
     return
   }
   // 触控板惯性会连续发事件：两档之间留 120ms，免得一下滑到底
   const now = Date.now()
   if (now - lastZoomWheelAt < 120) return
   lastZoomWheelAt = now
-  stepPageZoom(event.deltaY < 0 ? 1 : -1)
+  stepPageZoom(event.deltaY < 0 ? 1 : -1, { x: event.clientX, y: event.clientY })
 }, { passive: false, capture: true })
 
 document.querySelector('#btnZoomIn').addEventListener('click', () => stepPageZoom(1))
 document.querySelector('#btnZoomOut').addEventListener('click', () => stepPageZoom(-1))
-document.querySelector('#btnZoomReset').addEventListener('click', () => applyPageZoom(100))
+document.querySelector('#btnZoomReset').addEventListener('click', () => applyPageZoom(100, zoomAnchor()))
 
 document.querySelector('#pageSize').addEventListener('change', (e) => setPageSetup({ size: e.target.value }))
 document.querySelector('#pageOrientation').addEventListener('change', (e) => setPageSetup({ orientation: e.target.value }))
@@ -3813,7 +3852,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.6'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.7'}`
 
 /* ---------------- 查找替换 ---------------- */
 
