@@ -167,256 +167,37 @@ fn configure_webview_settings(window: &tauri::WebviewWindow) {
     });
 }
 
-// Windows 触控板捏合：内建缩放关掉后，precision touchpad 的 pinch 既不会变成
-// Ctrl+滚轮，也不会走 DOM gesture* 事件，只能在原生窗口层接 WM_GESTURE。
-// 这里给顶层窗口和 WebView2 的所有子窗口挂子类过程：认出 GID_ZOOM 就把两指
-// 距离换算成 scale，交给渲染层的 window.__wordlitePinch；其它手势原样放行。
+// Tauri/wry 建 WebView2 时会把 zoom_hotkeys_enabled（默认 false）同时写进
+// IsZoomControlEnabled 和 IsPinchZoomEnabled；后者一关，WebView2 就不做捏合识别，
+// 原生层和 DOM 层都不会收到任何事件（所以之前的 WM_GESTURE 日志是空的）。
+// 这里单独把捏合识别打开；真正的缩放由渲染层的 ctrl+wheel 监听器接管。
 #[cfg(windows)]
-static GESTURE_APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
-#[cfg(windows)]
-static GESTURE_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-#[cfg(windows)]
-static GESTURE_START_DISTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-#[cfg(windows)]
-static GESTURE_LAST_SCALE_MILLI: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(1000);
-
-#[cfg(windows)]
-const GF_BEGIN: u32 = 0x0000_0001;
-#[cfg(windows)]
-const GF_END: u32 = 0x0000_0004;
-#[cfg(windows)]
-const GC_ZOOM: u32 = 0x0000_0001;
-
-#[cfg(windows)]
-fn configure_windows_gesture(window: &tauri::WebviewWindow) {
-    use windows::Win32::Foundation::{HWND, LPARAM};
-
-    let _ = GESTURE_APP.set(window.app_handle().clone());
-    let Ok(root) = window.hwnd() else {
-        return;
+fn configure_windows_pinch(window: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2Settings5, ICoreWebView2_3,
     };
-    // HWND 里有裸指针，不是 Send；闭包要求 Send，转成 isize 带进去再还原
-    let root_raw = root.0 as isize;
-    let _ = window.with_webview(move |_webview| unsafe {
-        let root = HWND(root_raw as *mut core::ffi::c_void);
-        // with_webview 时 WebView2 的子窗口已经建好；顶层 + 全部子窗口都挂上，
-        // 不赌系统把 WM_GESTURE 送到哪一层。
-        install_gesture_subclass(root);
-        let mut children: Vec<HWND> = Vec::new();
-        let _ = windows::Win32::UI::WindowsAndMessaging::EnumChildWindows(
-            Some(root),
-            Some(collect_child_window),
-            LPARAM(&mut children as *mut Vec<HWND> as isize),
-        );
-        for child in children {
-            install_gesture_subclass(child);
+    use windows::core::Interface;
+
+    let _ = window.with_webview(|webview| {
+        let setup = (|| -> Result<(), String> {
+            let controller = webview.controller();
+            let core: ICoreWebView2_3 = unsafe { controller.CoreWebView2() }
+                .and_then(|core| core.cast())
+                .map_err(|e| e.to_string())?;
+            let settings5: ICoreWebView2Settings5 = unsafe { core.Settings() }
+                .and_then(|settings| settings.cast())
+                .map_err(|e| e.to_string())?;
+            unsafe {
+                settings5
+                    .SetIsPinchZoomEnabled(true)
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = setup {
+            eprintln!("[wordlite] 开启触控板捏合识别失败：{error}");
         }
     });
-}
-
-#[cfg(windows)]
-unsafe extern "system" fn collect_child_window(
-    hwnd: windows::Win32::Foundation::HWND,
-    lparam: windows::Win32::Foundation::LPARAM,
-) -> windows::core::BOOL {
-    let children = unsafe { &mut *(lparam.0 as *mut Vec<windows::Win32::Foundation::HWND>) };
-    children.push(hwnd);
-    windows::core::BOOL(1)
-}
-
-#[cfg(windows)]
-unsafe fn install_gesture_subclass(hwnd: windows::Win32::Foundation::HWND) {
-    use windows::Win32::UI::Input::Touch::{RegisterTouchWindow, TWF_FINETOUCH};
-    use windows::Win32::UI::Shell::SetWindowSubclass;
-
-    // 手势引擎只往注册过触摸的窗口发 WM_GESTURE；WebView2 自己可能已经注册过，
-    // 重复注册会被系统忽略，这里补一道不亏。
-    let _ = unsafe { RegisterTouchWindow(hwnd, TWF_FINETOUCH) };
-    let _ = unsafe { SetWindowSubclass(hwnd, Some(gesture_subclass_proc), 0x5712, 0) };
-    unsafe { apply_gesture_config(hwnd) };
-}
-
-#[cfg(windows)]
-unsafe fn apply_gesture_config(hwnd: windows::Win32::Foundation::HWND) {
-    use windows::Win32::UI::Input::Touch::{SetGestureConfig, GESTURECONFIG, GID_ZOOM};
-
-    let config = GESTURECONFIG {
-        dwID: GID_ZOOM,
-        dwWant: GC_ZOOM,
-        dwBlock: 0,
-    };
-    let _ = unsafe {
-        SetGestureConfig(
-            hwnd,
-            0,
-            &[config],
-            std::mem::size_of::<GESTURECONFIG>() as u32,
-        )
-    };
-}
-
-#[cfg(windows)]
-unsafe extern "system" fn gesture_subclass_proc(
-    hwnd: windows::Win32::Foundation::HWND,
-    msg: u32,
-    wparam: windows::Win32::Foundation::WPARAM,
-    lparam: windows::Win32::Foundation::LPARAM,
-    _uid: usize,
-    _refdata: usize,
-) -> windows::Win32::Foundation::LRESULT {
-    use windows::Win32::Foundation::LRESULT;
-    use windows::Win32::UI::Input::Touch::{
-        CloseGestureInfoHandle, GetGestureInfo, GESTUREINFO, GID_ZOOM, HGESTUREINFO,
-    };
-    use windows::Win32::UI::Shell::DefSubclassProc;
-    use windows::Win32::UI::WindowsAndMessaging::{WM_GESTURE, WM_GESTURENOTIFY};
-
-    // 系统在第一次手势前会发 WM_GESTURENOTIFY，窗口在这时决定要哪些手势。
-    // WebView2 自己也会配一次；先让它处理，再把我们的 GID_ZOOM 配置盖上，
-    // 免得它把缩放手势关掉。
-    if msg == WM_GESTURENOTIFY {
-        log_gesture_line(hwnd, "notify");
-        let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
-        unsafe { apply_gesture_config(hwnd) };
-        return result;
-    }
-    if msg == WM_GESTURE {
-        let handle = HGESTUREINFO(lparam.0 as *mut core::ffi::c_void);
-        let mut info = GESTUREINFO {
-            cbSize: std::mem::size_of::<GESTUREINFO>() as u32,
-            ..Default::default()
-        };
-        if unsafe { GetGestureInfo(handle, &mut info) }.is_ok() {
-            if info.dwID == GID_ZOOM.0 {
-                unsafe { handle_zoom_gesture(hwnd, &info) };
-                let _ = unsafe { CloseGestureInfoHandle(handle) };
-                // 返回 0 = 这次手势到此为止，不再交给 WebView2
-                return LRESULT(0);
-            }
-            // 不是缩放：不关句柄，原样交给下一个处理者，让它自己关
-        }
-    }
-    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
-}
-
-#[cfg(windows)]
-unsafe fn handle_zoom_gesture(
-    hwnd: windows::Win32::Foundation::HWND,
-    info: &windows::Win32::UI::Input::Touch::GESTUREINFO,
-) {
-    use std::sync::atomic::Ordering;
-
-    log_gesture(hwnd, info);
-    let begin = info.dwFlags & GF_BEGIN != 0;
-    let end = info.dwFlags & GF_END != 0;
-    if begin {
-        GESTURE_START_DISTANCE.store(info.ullArguments, Ordering::SeqCst);
-        GESTURE_ACTIVE.store(true, Ordering::SeqCst);
-        GESTURE_LAST_SCALE_MILLI.store(1000, Ordering::SeqCst);
-        send_native_pinch(hwnd, "start", 1.0);
-        if end {
-            GESTURE_ACTIVE.store(false, Ordering::SeqCst);
-            send_native_pinch(hwnd, "end", 1.0);
-        }
-        return;
-    }
-    if !GESTURE_ACTIVE.load(Ordering::SeqCst) {
-        return;
-    }
-    let start = GESTURE_START_DISTANCE.load(Ordering::SeqCst);
-    if start == 0 {
-        // 有的设备第一帧距离给 0：拿第一个非零距离当起点，别让整次捏合作废
-        if info.ullArguments > 0 {
-            GESTURE_START_DISTANCE.store(info.ullArguments, Ordering::SeqCst);
-            GESTURE_LAST_SCALE_MILLI.store(1000, Ordering::SeqCst);
-        }
-    } else if info.ullArguments > 0 {
-        let scale = info.ullArguments as f64 / start as f64;
-        let milli = (scale * 1000.0).round() as u64;
-        // 只送变化超过 0.5% 的，避免每个原始事件都进一次 eval
-        if milli.abs_diff(GESTURE_LAST_SCALE_MILLI.load(Ordering::SeqCst)) >= 5 {
-            GESTURE_LAST_SCALE_MILLI.store(milli, Ordering::SeqCst);
-            send_native_pinch(hwnd, "change", scale);
-        }
-    }
-    if end {
-        GESTURE_ACTIVE.store(false, Ordering::SeqCst);
-        GESTURE_START_DISTANCE.store(0, Ordering::SeqCst);
-        send_native_pinch(hwnd, "end", 1.0);
-    }
-}
-
-#[cfg(windows)]
-fn send_native_pinch(hwnd: windows::Win32::Foundation::HWND, phase: &str, scale: f64) {
-    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
-
-    let Some(app) = GESTURE_APP.get() else {
-        return;
-    };
-    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
-    for window in app.webview_windows().values() {
-        if window.hwnd().ok() != Some(root) {
-            continue;
-        }
-        let js = if phase == "change" {
-            format!("window.__wordlitePinch && window.__wordlitePinch('change', {scale:.4})")
-        } else {
-            format!("window.__wordlitePinch && window.__wordlitePinch('{phase}')")
-        };
-        let _ = window.eval(&js);
-        break;
-    }
-}
-
-#[cfg(windows)]
-fn log_gesture(
-    hwnd: windows::Win32::Foundation::HWND,
-    info: &windows::Win32::UI::Input::Touch::GESTUREINFO,
-) {
-    log_gesture_line(
-        hwnd,
-        &format!(
-            "id={} flags=0x{:x} args={}",
-            info.dwID, info.dwFlags, info.ullArguments
-        ),
-    );
-}
-
-// 自测用：从原生侧走一遍「找窗口 → eval → 渲染层缩放」，代替物理捏合。
-// 真正收 WM_GESTURE 的那一段只能靠手指验，这一条覆盖它后面的链路。
-#[cfg(windows)]
-#[tauri::command]
-fn native_pinch_test(window: tauri::WebviewWindow, scale: f64) -> Result<(), String> {
-    let hwnd = window.hwnd().map_err(|e| e.to_string())?;
-    send_native_pinch(hwnd, "start", 1.0);
-    send_native_pinch(hwnd, "change", scale);
-    send_native_pinch(hwnd, "end", 1.0);
-    Ok(())
-}
-
-#[cfg(not(windows))]
-#[tauri::command]
-fn native_pinch_test(scale: f64) -> Result<(), String> {
-    let _ = scale;
-    Err("native pinch test is Windows-only".into())
-}
-
-#[cfg(windows)]
-fn log_gesture_line(hwnd: windows::Win32::Foundation::HWND, detail: &str) {
-    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
-
-    let mut buf = [0u16; 256];
-    let len = unsafe { GetClassNameW(hwnd, &mut buf) }.max(0) as usize;
-    let class = String::from_utf16_lossy(&buf[..len]);
-    let line = format!("hwnd={:?} class={class} {detail}\n", hwnd);
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(std::env::temp_dir().join("wordlite-gesture.log"))
-    {
-        let _ = file.write_all(line.as_bytes());
-    }
 }
 
 // macOS：WKWebView 默认允许双指捏合做「整体放大」（allowsMagnification / zoomPageByFactors）。
@@ -469,9 +250,10 @@ fn build_document_window(
         }
     };
     #[cfg(windows)]
-    configure_webview_settings(&window);
-    #[cfg(windows)]
-    configure_windows_gesture(&window);
+    {
+        configure_webview_settings(&window);
+        configure_windows_pinch(&window);
+    }
     #[cfg(target_os = "macos")]
     {
         configure_mac_webview(&window);
@@ -1708,9 +1490,14 @@ fn handle_run_event(_app: &tauri::AppHandle, _event: tauri::RunEvent) {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 自测跳过单实例：用户正开着的简写会把测试进程当成第二次启动吞掉
+    let is_selftest = std::env::args().any(|arg| arg == "--selftest");
     let app = tauri::Builder::default()
         // 单实例必须第一个注册：第二次启动（右键打开/双击文件）时新建独立窗口
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        .plugin(if is_selftest {
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("skip-single-instance").build()
+        } else {
+            tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // 窗口回调里同步建 WebView 在 Windows 上可能死锁，放到异步线程里做
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -1757,7 +1544,8 @@ pub fn run() {
                     let _ = create_document_window(&handle, None);
                 }
             });
-        }))
+            })
+        })
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .setup(|app| {
@@ -1765,7 +1553,7 @@ pub fn run() {
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
                 configure_webview_settings(&window);
-                configure_windows_gesture(&window);
+                configure_windows_pinch(&window);
             }
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
@@ -1982,33 +1770,23 @@ pub fn run() {
                                     paperEl.style.zoom === '';
                                 probeDialog.close();
                                 probeDialog.remove();
-                                // Windows 原生手势桥：native 层直接调 window.__wordlitePinch
-                                zoomLabel.click();
-                                await new Promise((resolve) => setTimeout(resolve, 100));
-                                const nativeStarted = window.__wordlitePinch('start');
-                                window.__wordlitePinch('change', 1.25);
-                                await new Promise((resolve) => requestAnimationFrame(() => resolve()));
-                                const nativePreview = paperEl.style.zoom === '1.25' &&
-                                    zoomLabel.textContent === '125%';
-                                window.__wordlitePinch('end');
-                                await new Promise((resolve) => setTimeout(resolve, 120));
-                                results.nativePinch = nativeStarted === true && nativePreview &&
-                                    paperEl.style.zoom === '1.25' &&
-                                    zoomLabel.textContent === '125%' &&
-                                    JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === 125;
-                                zoomLabel.click();
-                                // 再从原生侧走一遍：Rust 找窗口 → eval → __wordlitePinch
+                                // 触控板捏合：WebView2 的合成事件是 ctrlKey=true、cancelable 的 wheel
                                 if (window.wordlite.platform === 'win') {{
                                     zoomLabel.click();
                                     await new Promise((resolve) => setTimeout(resolve, 100));
-                                    await window.__TAURI__.core.invoke('native_pinch_test', {{ scale: 1.25 }});
-                                    await new Promise((resolve) => setTimeout(resolve, 250));
-                                    results.nativePinchRust = paperEl.style.zoom === '1.25' &&
-                                        zoomLabel.textContent === '125%' &&
-                                        JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === 125;
+                                    const wheelEvent = new WheelEvent('wheel', {{
+                                        bubbles: true, cancelable: true, deltaY: -12, deltaMode: 0, ctrlKey: true
+                                    }});
+                                    window.dispatchEvent(wheelEvent);
+                                    await new Promise((resolve) => setTimeout(resolve, 320));
+                                    const wheelZoom = Number(zoomLabel.textContent.replace('%', ''));
+                                    results.pagePinchWheel = wheelEvent.defaultPrevented &&
+                                        wheelZoom < 100 && wheelZoom >= 10 &&
+                                        paperEl.style.zoom !== '' &&
+                                        JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === wheelZoom;
                                     zoomLabel.click();
                                 }} else {{
-                                    results.nativePinchRust = true;
+                                    results.pagePinchWheel = true;
                                 }}
                             }} catch (pinchError) {{
                                 results.pagePinchError = String(pinchError);
@@ -2501,7 +2279,6 @@ pub fn run() {
             print_to_pdf,
             export_pdf,
             set_ime_composing,
-            native_pinch_test,
             selftest_ready,
             selftest_report
         ])

@@ -7,8 +7,8 @@ const REQUIRED_BOOL = [
   'bridge', 'tauri', 'editor', 'openedNewWindow', 'blankDragOk', 'contextMenuOk', 'printPreviewRemoved',
   // 页面缩放：控件在、缩放生效、排版像素不变、能回 100%
   'pageZoomControls', 'pageZoomShrinks', 'pageZoomKeepsLayout', 'pageZoomReset',
-  // 触控板捏合：预览不写存储、松手落定、有弹窗时忽略、原生桥可用、原生到渲染层链路通
-  'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog', 'nativePinch', 'nativePinchRust'
+  // 触控板捏合：预览不写存储、松手落定、有弹窗时忽略、WebView2 合成 wheel 能驱动缩放
+  'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog', 'pagePinchWheel'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',

@@ -2988,10 +2988,10 @@ function setPageSetup (patch) {
 // 之所以能这么干：.paper 上的 zoom 让 getBoundingClientRect 跟着缩，
 // 而 clientWidth 仍是排版像素——图片按栏宽算尺寸、点击定位都不用改。
 const ZOOM_KEY = 'wordlite.zoom.v1'
-const ZOOM_MIN = 50
-const ZOOM_MAX = 200
+const ZOOM_MIN = 10
+const ZOOM_MAX = 400
 // 一档一档走，不做连续缩放：触控板一次手势会连发几十个 wheel 事件
-const ZOOM_STEPS = [50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200]
+const ZOOM_STEPS = [10, 25, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400]
 let pageZoom = clamp(storageRead(ZOOM_KEY, 100), ZOOM_MIN, ZOOM_MAX, 100)
 
 function renderPageZoom (value) {
@@ -3105,13 +3105,44 @@ window.addEventListener('gestureend', (event) => {
   event.preventDefault()
 }, { passive: false, capture: true })
 
-// Windows 原生捏合：WM_GESTURE 把两指距离换算成 scale 后从这里进来。
-// 和 Mac 的 gesture* 共用同一套「预览 → 松手落定」，只是事件源不同。
-window.__wordlitePinch = (phase, scale) => {
-  if (phase === 'start') return beginPinchZoom()
-  if (phase === 'change') return updatePinchZoom(Number(scale) || 1)
-  if (phase === 'end') return endPinchZoom()
-  return false
+// WebView2 的触控板捏合是它自己识别的合成 wheel：ctrlKey=true，但没有物理 Ctrl。
+// 真 Ctrl+滚轮一定伴随物理 Ctrl。用这一点分流，捏合走连续缩放。
+let physicalCtrlDown = false
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Control') physicalCtrlDown = true
+}, true)
+window.addEventListener('keyup', (event) => {
+  if (event.key === 'Control') physicalCtrlDown = false
+}, true)
+window.addEventListener('blur', () => {
+  physicalCtrlDown = false
+})
+
+function isPinchWheel (event) {
+  return !isMac && event.ctrlKey && !physicalCtrlDown &&
+    event.deltaMode === 0 && Math.abs(event.deltaY) < 40
+}
+
+// 一连串捏合 delta 当成一次手势：连续预览，180ms 没有新事件就落定。
+let wheelZoomTimer = 0
+let wheelZoomTarget = null
+
+window.__wordliteWheelZoom = (delta) => {
+  if (document.querySelector('dialog[open]')) return false
+  if (pinchBaseZoom === null) {
+    if (!beginPinchZoom()) return false
+    wheelZoomTarget = pageZoom
+  }
+  const factor = Math.pow(1.0018, Number(delta) || 0)
+  wheelZoomTarget = clamp(Math.round(wheelZoomTarget * factor), ZOOM_MIN, ZOOM_MAX, wheelZoomTarget)
+  queuePinchPreview(wheelZoomTarget)
+  clearTimeout(wheelZoomTimer)
+  wheelZoomTimer = setTimeout(() => {
+    wheelZoomTimer = 0
+    wheelZoomTarget = null
+    endPinchZoom()
+  }, 180)
+  return true
 }
 
 // Ctrl+滚轮（Mac 上是 ⌘+滚轮）缩放页面。Mac 的双指捏合走的是系统手势、
@@ -3123,9 +3154,18 @@ function isZoomWheel (event) {
 let lastZoomWheelAt = 0
 window.addEventListener('wheel', (event) => {
   if (!isZoomWheel(event) || event.deltaY === 0) return
-  // 模态框（设置、帮助、图片查看器）都有自己的滚轮语义，不放给页面缩放
-  if (document.querySelector('dialog[open]')) return
+  // 模态框（设置、帮助、图片查看器）都有自己的滚轮语义，不放给页面缩放；
+  // 但也要 preventDefault，别让 WebView2 自己的整页缩放接管
+  if (document.querySelector('dialog[open]')) {
+    event.preventDefault()
+    return
+  }
   event.preventDefault()
+  // 捏合是 WebView2 合成的连续 wheel；真 Ctrl+滚轮还是按档位走
+  if (isPinchWheel(event)) {
+    window.__wordliteWheelZoom(event.deltaY)
+    return
+  }
   // 触控板惯性会连续发事件：两档之间留 120ms，免得一下滑到底
   const now = Date.now()
   if (now - lastZoomWheelAt < 120) return
@@ -3773,7 +3813,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.5'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.6'}`
 
 /* ---------------- 查找替换 ---------------- */
 
