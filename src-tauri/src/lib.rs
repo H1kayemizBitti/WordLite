@@ -1781,7 +1781,7 @@ pub fn run() {
                                     await new Promise((resolve) => setTimeout(resolve, 320));
                                     const wheelZoom = Number(zoomLabel.textContent.replace('%', ''));
                                     results.pagePinchWheel = wheelEvent.defaultPrevented &&
-                                        wheelZoom > 100 && wheelZoom <= 400 &&
+                                        wheelZoom > 100 && wheelZoom <= 1000 &&
                                         paperEl.style.zoom !== '' &&
                                         JSON.parse(localStorage.getItem('wordlite.zoom.v1')) === wheelZoom;
                                     zoomLabel.click();

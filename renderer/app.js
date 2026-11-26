@@ -2989,10 +2989,11 @@ function setPageSetup (patch) {
 // 而 clientWidth 仍是排版像素——图片按栏宽算尺寸、点击定位都不用改。
 const ZOOM_KEY = 'wordlite.zoom.v1'
 const ZOOM_MIN = 10
-const ZOOM_MAX = 400
+const ZOOM_MAX = 1000
 // 一档一档走，不做连续缩放：触控板一次手势会连发几十个 wheel 事件
-const ZOOM_STEPS = [10, 25, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400]
-let pageZoom = clamp(storageRead(ZOOM_KEY, 100), ZOOM_MIN, ZOOM_MAX, 100)
+const ZOOM_STEPS = [10, 25, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500, 600, 750, 1000]
+// 打开固定 100%，不恢复上次比例（上次存的值可能把默认顶成 150% 之类）
+let pageZoom = 100
 let renderedZoom = 100
 let lastPointer = null
 let pinchAnchor = null
@@ -3870,7 +3871,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.8'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.1.9'}`
 
 /* ---------------- 查找替换 ---------------- */
 
