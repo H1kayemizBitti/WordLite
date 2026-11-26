@@ -11,13 +11,15 @@ const REQUIRED_BOOL = [
   'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog', 'pagePinchWheel',
   // 屏幕分页：多页、页缝无字、不改文档、双击收起/恢复
   'pagePagination', 'pagePaginationNoGapText', 'pagePaginationModel',
-  'pagePaginationCollapse', 'pagePaginationRestore', 'pageNumberDefaultOff', 'pageSetupDialog',
+  'pagePaginationCollapse', 'pagePaginationSeam', 'pagePaginationRestore', 'pageNumberDefaultOff', 'pageSetupDialog',
+  // 页码和页脚文字区分开、下拉框里按 Ctrl+P 也能打印
+  'pageNumberDistinct', 'printShortcutFromSelect',
   // 段落设置：对话框能开/关、固定值 20 磅、段前段后 12/8 磅
   'paragraphDialog', 'paragraphExactLine', 'paragraphSpacing',
   // 默认字体/字号标签、打印关闭保护命令
   'defaultFormatLabels', 'printingGuard',
-  // 工具栏单行、右下角详细工具侧板
-  'ribbonSingleRow', 'ribbonDetail'
+  // 工具栏单行、右下角详细工具侧板（宽窗停靠时正文不被盖住）
+  'ribbonSingleRow', 'ribbonDetail', 'ribbonDetailDocked'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',

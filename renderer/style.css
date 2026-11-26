@@ -254,28 +254,51 @@ body.file-drag-over::after {
 .ribbon-expand:hover { background: var(--hover-bg); color: var(--text); }
 .ribbon-expand.active { color: var(--accent); border-color: var(--accent); background: var(--active-bg); }
 
-/* 详细工具栏（非模态侧板）：工具栏压到最小宽度时，所有常用控件仍能从这里操作 */
+/* 详细工具栏（非模态侧板）：工具栏压到最小宽度时，所有常用控件仍能从这里操作。
+   窗口够宽时停靠在右侧，正文在剩余空间里重新居中（不压住纸）；
+   窗口太窄、停靠会挤到纸时，改成带边距的浮动卡片，避免看起来像布局被切掉。 */
 .tool-detail {
   position: fixed;
-  right: 0;
-  bottom: 28px;
   z-index: 25;
   width: 340px;
-  max-width: 92vw;
+  max-width: calc(100vw - 28px);
   display: flex;
   flex-direction: column;
   background: #fff;
+  overflow: hidden;
+  animation: tool-detail-in 0.16s ease;
+}
+
+.tool-detail[hidden] { display: none !important; }
+
+@keyframes tool-detail-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+body.tool-detail-docked .tool-detail {
+  right: 0;
+  bottom: 28px;
   border-left: 1px solid var(--border-strong);
   box-shadow: -8px 0 24px rgba(16, 24, 40, 0.12);
 }
 
-.tool-detail[hidden] { display: none !important; }
+body.tool-detail-floating .tool-detail {
+  right: 16px;
+  bottom: 38px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+}
+
+body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
 
 .tool-detail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
+  background: #fbfcfd;
   border-bottom: 1px solid var(--border);
   flex: none;
 }
@@ -572,6 +595,7 @@ body.file-drag-over::after {
   background:
     radial-gradient(circle at 50% 0, rgba(255, 255, 255, 0.7), transparent 60%),
     var(--bg-workspace);
+  transition: margin-right 0.16s ease;
 }
 
 .paper {
@@ -690,24 +714,32 @@ body.file-drag-over::after {
   z-index: 1;
 }
 
+/* 连续阅读：只留 1–2px 的换页线，文字真正接起来；标签放到右侧页边距里，
+   不占正文高度，也不会压住上下两行。 */
 .ProseMirror .page-break-marker {
   position: relative;
   display: block;
   width: 100%;
-  border-top: 1px dashed #c3c8d0;
-  background: transparent;
+}
+
+/* .page-gap-widget 在后面会把 border/background 清掉；这里用更高优先级专门画换页线 */
+.ProseMirror .page-gap-widget.page-break-marker {
+  border-top: 1px solid #aab3bf;
+  background: linear-gradient(to bottom, rgba(170, 179, 191, 0.12), transparent);
 }
 
 .page-break-marker-label {
   position: absolute;
   right: 0;
-  top: 5px;
-  padding-left: 6px;
-  background: var(--paper);
+  top: 50%;
+  transform: translate(100%, -50%);
+  padding-left: 8px;
+  background: transparent;
   font-family: -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1;
   color: #9aa0a6;
+  white-space: nowrap;
   pointer-events: none;
   user-select: none;
 }

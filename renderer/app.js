@@ -788,10 +788,20 @@ const detailBlockSel = document.querySelector('#detailBlock')
 const detailColorInput = document.querySelector('#detailColor')
 const detailHighlightInput = document.querySelector('#detailHighlight')
 
+const TOOL_DETAIL_WIDTH = 340
+
 function positionToolDetail () {
   if (!toolDetailEl || toolDetailEl.hidden) return
   const ribbon = document.querySelector('#ribbon').getBoundingClientRect()
-  toolDetailEl.style.top = `${ribbon.bottom}px`
+  const paper = document.querySelector('.paper')
+  const paperWidth = paper ? paper.getBoundingClientRect().width : 794
+  const panelWidth = toolDetailEl.offsetWidth || TOOL_DETAIL_WIDTH
+  // 右侧停靠后正文还有地方放整张纸，才停靠；否则用带边距的浮动卡片。
+  // 20px 是纸和面板之间留的呼吸距离。
+  const docked = window.innerWidth >= paperWidth + panelWidth + 20
+  document.body.classList.toggle('tool-detail-docked', docked)
+  document.body.classList.toggle('tool-detail-floating', !docked)
+  toolDetailEl.style.top = `${ribbon.bottom + (docked ? 0 : 8)}px`
 }
 
 function syncDetailControls () {
@@ -820,6 +830,7 @@ function syncDetailControls () {
 
 function openToolDetail () {
   toolDetailEl.hidden = false
+  document.body.classList.add('tool-detail-open')
   btnRibbonExpand.classList.add('active')
   btnRibbonExpand.setAttribute('aria-expanded', 'true')
   positionToolDetail()
@@ -828,6 +839,7 @@ function openToolDetail () {
 
 function closeToolDetail () {
   toolDetailEl.hidden = true
+  document.body.classList.remove('tool-detail-open', 'tool-detail-docked', 'tool-detail-floating')
   btnRibbonExpand.classList.remove('active')
   btnRibbonExpand.setAttribute('aria-expanded', 'false')
 }
@@ -839,6 +851,8 @@ btnRibbonExpand.addEventListener('click', () => {
 document.querySelector('#btnToolDetailClose').addEventListener('click', closeToolDetail)
 window.addEventListener('resize', positionToolDetail)
 new ResizeObserver(positionToolDetail).observe(document.querySelector('#ribbon'))
+const detailPaperEl = document.querySelector('.paper')
+if (detailPaperEl) new ResizeObserver(positionToolDetail).observe(detailPaperEl)
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || toolDetailEl.hidden) return
@@ -3057,6 +3071,13 @@ document.addEventListener('keydown', (e) => {
     openFind(key === 'h' ? 'replace' : 'find')
     return
   }
+  // 打印不受表单焦点影响：从「页码」下拉框选完直接按 Ctrl+P 也要能打印。
+  // directPrint 自己会在有模态对话框时退出，所以对话框里不会误触。
+  if (key === 'p') {
+    e.preventDefault()
+    directPrint()
+    return
+  }
   if (inForm) return
 
   if (key === 'o') {
@@ -3067,11 +3088,6 @@ document.addEventListener('keydown', (e) => {
   if (key === 'n') {
     e.preventDefault()
     newDocumentOrWindow()
-    return
-  }
-  if (key === 'p') {
-    e.preventDefault()
-    directPrint()
     return
   }
   if (e.code === 'Enter') {
@@ -3312,27 +3328,34 @@ function buildPrintPageStyle (dimensions, margins) {
   const header = pageSetup.headerText.trim()
   const footer = pageSetup.footerText.trim()
   const printNumber = pageSetup.pageNumber === 'print'
-  const base = `font-size:${pageSetup.headerFooterFontSize}pt;color:#595959;font-family:"等线","Microsoft YaHei","PingFang SC",sans-serif;`
+  const fontSize = pageSetup.headerFooterFontSize
+  const numberFontSize = Math.max(6, Math.round((fontSize - 1) * 2) / 2)
+  // 页码和页脚文字分开放：有页脚时页码去对面（页脚居中则页码靠右），
+  // 没有页脚时页码按页脚对齐方式放。这样两行内容不会挤在同一个边距盒里。
+  const numberPosition = footer
+    ? (position === 'right' ? 'left' : 'right')
+    : position
+  const base = `font-size:${fontSize}pt;color:#595959;font-family:"等线","Microsoft YaHei","PingFang SC",sans-serif;`
+  const numberBase = `font-size:${numberFontSize}pt;color:#8a8f99;` +
+    'font-family:"等线","Microsoft YaHei","PingFang SC",sans-serif;' +
+    'letter-spacing:0.04em;font-variant-numeric:tabular-nums;'
   const boxes = []
   for (const side of ['top', 'bottom']) {
     for (const pos of ['left', 'center', 'right']) {
       const name = `${side}-${pos}`
       let content = '""'
-      let extra = ''
+      let style = base
       if (side === 'top' && pos === position && header) {
         content = cssQuoted(header)
       }
-      if (side === 'bottom' && pos === position) {
-        if (footer && printNumber) {
-          content = `${cssQuoted(footer)} "\\A" counter(page)`
-          extra = 'white-space:pre;'
-        } else if (footer) {
-          content = cssQuoted(footer)
-        } else if (printNumber) {
-          content = 'counter(page)'
+      if (side === 'bottom') {
+        if (footer && pos === position) content = cssQuoted(footer)
+        if (printNumber && pos === numberPosition) {
+          content = `"— " counter(page) " —"`
+          style = numberBase
         }
       }
-      boxes.push(`@${name} { content:${content}; ${base}${extra ? ` ${extra}` : ''} }`)
+      boxes.push(`@${name} { content:${content}; ${style} }`)
     }
   }
   return `@page { size: ${dimensions.width}cm ${dimensions.height}cm; ` +

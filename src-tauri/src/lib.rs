@@ -1849,9 +1849,20 @@ pub fn run() {
                                 const foldedState = window.__wordlitePagination.state();
                                 const foldedMarkers = document.querySelectorAll('.page-break-marker').length;
                                 const foldedSheets = document.querySelectorAll('.page-sheet').length;
+                                const foldedMarker = document.querySelector('.page-break-marker');
+                                const foldedMarkerStyle = foldedMarker ? getComputedStyle(foldedMarker) : null;
+                                const foldedMarkerRect = foldedMarker ? foldedMarker.getBoundingClientRect() : null;
                                 results.pagePaginationCollapse = foldedState.collapsed === true &&
                                     paperForPage.classList.contains('reading-mode') &&
                                     foldedSheets === 0 && foldedMarkers === foldedState.pageCount - 1;
+                                // 换页线必须真的画出来（曾被后面的 .page-gap-widget 规则把 border 清掉）。
+                                // WebView2 在 175% 系统缩放下会把 1px 算成 0.571429px，
+                                // 所以只要求 border 宽度大于 0，不能写死等于 1px。
+                                results.pagePaginationSeam = !!foldedMarker &&
+                                    Number.parseFloat(foldedMarkerStyle.borderTopWidth) > 0.25 &&
+                                    foldedMarkerStyle.borderTopStyle === 'solid' &&
+                                    foldedMarkerRect.width > 100 &&
+                                    foldedMarkerRect.height >= 1 && foldedMarkerRect.height <= 2.5;
                                 window.__wordlitePagination.toggleGap();
                                 await new Promise((resolve) => setTimeout(resolve, 600));
                                 const restoredState = window.__wordlitePagination.state();
@@ -1863,7 +1874,49 @@ pub fn run() {
                                 results.pageNumberDefaultOff = document.querySelector('#quickPageNumber').value === 'none' &&
                                     document.querySelectorAll('.page-sheet-footer-number').length === 0;
                                 results.pageSetupDialog = !!document.querySelector('#pageSetupDialog');
+                                // 页码要和页脚文字区分开：字号小一号、颜色更浅、放到页脚对面；
+                                // 打印样式里页脚和页码也必须在两个不同的 @page 边距盒里。
+                                try {{
+                                    const setSetupValue = (selector, value) => {{
+                                        const el = document.querySelector(selector);
+                                        el.value = value;
+                                        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                        el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    }};
+                                    document.querySelector('#btnPageSetup').click();
+                                    await new Promise((resolve) => setTimeout(resolve, 100));
+                                    setSetupValue('#setupPageNumber', 'print');
+                                    setSetupValue('#setupFooterText', '内部资料');
+                                    setSetupValue('#setupHeaderFooterAlign', 'center');
+                                    document.querySelector('#pageSetupForm').requestSubmit();
+                                    await new Promise((resolve) => setTimeout(resolve, 800));
+                                    const numberBlocks = Array.from(document.querySelectorAll('.page-sheet-page-number'));
+                                    const footerTexts = Array.from(document.querySelectorAll('.page-sheet-footer-text'));
+                                    const numberText = numberBlocks[0]?.querySelector('.page-sheet-footer-number');
+                                    const numberStyle = numberBlocks[0] ? getComputedStyle(numberBlocks[0]) : null;
+                                    const footerStyle = footerTexts[0] ? getComputedStyle(footerTexts[0]) : null;
+                                    const printStyle = document.querySelector('#printPageStyle').textContent;
+                                    results.pageNumberDistinct = numberBlocks.length > 0 &&
+                                        numberBlocks.length === footerTexts.length &&
+                                        numberText?.textContent === '— 1 —' &&
+                                        footerTexts[0].textContent === '内部资料' &&
+                                        Number.parseFloat(numberStyle.fontSize) < Number.parseFloat(footerStyle.fontSize) &&
+                                        numberStyle.textAlign === 'right' &&
+                                        printStyle.includes('@bottom-center {{ content:"内部资料";') &&
+                                        printStyle.includes('@bottom-right {{ content:"— " counter(page) " —";');
+                                    // 复位，后面的段落测试从干净状态开始
+                                    document.querySelector('#btnPageSetup').click();
+                                    await new Promise((resolve) => setTimeout(resolve, 80));
+                                    setSetupValue('#setupPageNumber', 'none');
+                                    setSetupValue('#setupFooterText', '');
+                                    document.querySelector('#pageSetupForm').requestSubmit();
+                                    await new Promise((resolve) => setTimeout(resolve, 350));
+                                }} catch (pageNumberError) {{
+                                    results.pageNumberDistinct = false;
+                                    results.pageNumberError = String(pageNumberError);
+                                }}
                             }} catch (pageError) {{
+                                results.pagePaginationSeam = false;
                                 results.pagePaginationError = String(pageError);
                             }}
                             // 段落设置：固定行距 20 磅 + 段前 12 磅 + 段后 8 磅
@@ -1913,20 +1966,30 @@ pub fn run() {
                             }}
                             // 工具栏单行 + 右下角详细工具侧板
                             try {{
+                                document.querySelector('#btnZoomReset').click();
+                                await new Promise((resolve) => setTimeout(resolve, 120));
                                 const homeGroups = Array.from(document.querySelectorAll('#panel-home > .group')).map((el) => el.getBoundingClientRect());
                                 const groupTops = new Set(homeGroups.map((rect) => Math.round(rect.top)));
                                 results.ribbonSingleRow = groupTops.size === 1 &&
                                     document.querySelector('#ribbon').getBoundingClientRect().height < 220;
                                 document.querySelector('#btnRibbonExpand').click();
-                                await new Promise((resolve) => setTimeout(resolve, 180));
+                                await new Promise((resolve) => setTimeout(resolve, 300));
                                 const detailSheet = document.querySelector('#toolDetail');
+                                const ribbonRect = document.querySelector('#ribbon').getBoundingClientRect();
+                                const workspaceEl = document.querySelector('#workspace');
+                                const paperEl = document.querySelector('.paper');
+                                const detailRect = detailSheet.getBoundingClientRect();
                                 results.ribbonDetail = !detailSheet.hidden &&
-                                    detailSheet.getBoundingClientRect().top >=
-                                        document.querySelector('#ribbon').getBoundingClientRect().bottom - 1;
+                                    detailRect.top >= ribbonRect.bottom - 1;
+                                results.ribbonDetailDocked = document.body.classList.contains('tool-detail-docked') &&
+                                    Math.abs(Number.parseFloat(getComputedStyle(workspaceEl).marginRight) - 340) < 2 &&
+                                    detailRect.left >= workspaceEl.getBoundingClientRect().right - 1 &&
+                                    paperEl.getBoundingClientRect().right <= detailRect.left + 1;
                                 document.querySelector('#btnToolDetailClose').click();
                             }} catch (ribbonError) {{
                                 results.ribbonSingleRow = false;
                                 results.ribbonDetail = false;
+                                results.ribbonDetailDocked = false;
                                 results.ribbonError = String(ribbonError);
                             }}
                             try {{
@@ -1936,6 +1999,33 @@ pub fn run() {
                             }} catch (printingError) {{
                                 results.printingGuard = false;
                                 results.printingGuardError = String(printingError);
+                            }}
+                            // 焦点在「页码」下拉框里时 Ctrl+P 也要直接打印（不能要求先点正文）
+                            try {{
+                                const printFile = window.wordlite.file;
+                                const originalPrint = printFile.print;
+                                const originalPrintMode = printFile.setPrintingMode;
+                                printFile.print = () => Promise.resolve();
+                                printFile.setPrintingMode = () => Promise.resolve();
+                                const numberSelect = document.querySelector('#quickPageNumber');
+                                numberSelect.focus();
+                                const mod = window.wordlite.platform === 'mac'
+                                    ? {{ metaKey: true }}
+                                    : {{ ctrlKey: true }};
+                                const printKey = new KeyboardEvent('keydown', {{
+                                    key: 'p', bubbles: true, cancelable: true, ...mod
+                                }});
+                                numberSelect.dispatchEvent(printKey);
+                                await new Promise((resolve) => setTimeout(resolve, 150));
+                                results.printShortcutFromSelect = printKey.defaultPrevented === true &&
+                                    document.body.classList.contains('printing');
+                                window.dispatchEvent(new Event('afterprint'));
+                                await new Promise((resolve) => setTimeout(resolve, 80));
+                                printFile.print = originalPrint;
+                                printFile.setPrintingMode = originalPrintMode;
+                            }} catch (printShortcutError) {{
+                                results.printShortcutFromSelect = false;
+                                results.printShortcutError = String(printShortcutError);
                             }}
                             try {{
                                 await withTimeout(window.__TAURI__.core.invoke('open_external', {{ path: {probe} }}), 5000);

@@ -13,7 +13,9 @@ export const paginationKey = new PluginKey('wordlitePagination')
 
 const EPS = 0.5
 const MAX_PAGES = 5000
-const READING_MARKER_HEIGHT = 26
+// 连续阅读时页缝只留 2px：文字几乎接在一起，但仍能看见换页线。
+// 双击命中由 gapBands 两侧各放宽 8px 兜住，不需要把可见页缝做高。
+const READING_MARKER_HEIGHT = 2
 const TEXT_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE'])
 
 export const Pagination = Extension.create({
@@ -433,9 +435,16 @@ export function createPaginator ({
     const align = hf.align || 'center'
     const fontSize = hf.fontSize || 9
     const fontFamily = '"等线","Microsoft YaHei","PingFang SC",sans-serif'
-    const common = 'position:absolute;' +
+    // 页码比页脚文字小一号、颜色更浅，并放在页脚对面，避免和页脚文字混成一排。
+    const numberFontSize = Math.max(6, fontSize - 1)
+    const numberAlign = footer ? (align === 'right' ? 'left' : 'right') : align
+    const headerFooterCommon = 'position:absolute;' +
       `text-align:${align};font-size:${fontSize}pt;font-family:${fontFamily};` +
       'color:#595959;line-height:1.35;pointer-events:none;user-select:none;white-space:pre-wrap;'
+    const numberCommon = 'position:absolute;' +
+      `text-align:${numberAlign};font-size:${numberFontSize}pt;font-family:${fontFamily};` +
+      'color:#8a8f99;line-height:1.35;pointer-events:none;user-select:none;white-space:pre;' +
+      'letter-spacing:0.04em;font-variant-numeric:tabular-nums;'
 
     const sheets = []
     for (let i = 0; i < pageCount; i += 1) {
@@ -448,27 +457,30 @@ export function createPaginator ({
         const el = document.createElement('div')
         el.className = 'page-sheet-header'
         el.textContent = header
-        el.style.cssText = common +
+        el.style.cssText = headerFooterCommon +
           `left:${geom.marginLeft}px;right:${geom.marginRight}px;top:${geom.marginTop / 2}px;transform:translateY(-50%);`
         sheet.appendChild(el)
       }
-      if (footer || showNumber) {
+      if (footer) {
         const el = document.createElement('div')
         el.className = 'page-sheet-footer'
-        el.style.cssText = common +
+        el.style.cssText = headerFooterCommon +
           `left:${geom.marginLeft}px;right:${geom.marginRight}px;bottom:${geom.marginBottom / 2}px;transform:translateY(50%);`
-        if (footer) {
-          const text = document.createElement('span')
-          text.className = 'page-sheet-footer-text'
-          text.textContent = footer
-          el.appendChild(text)
-        }
-        if (showNumber) {
-          const number = document.createElement('span')
-          number.className = 'page-sheet-footer-number'
-          number.textContent = String(i + 1)
-          el.appendChild(number)
-        }
+        const text = document.createElement('span')
+        text.className = 'page-sheet-footer-text'
+        text.textContent = footer
+        el.appendChild(text)
+        sheet.appendChild(el)
+      }
+      if (showNumber) {
+        const el = document.createElement('div')
+        el.className = 'page-sheet-page-number'
+        el.style.cssText = numberCommon +
+          `left:${geom.marginLeft}px;right:${geom.marginRight}px;bottom:${geom.marginBottom / 2}px;transform:translateY(50%);`
+        const number = document.createElement('span')
+        number.className = 'page-sheet-footer-number'
+        number.textContent = `— ${i + 1} —`
+        el.appendChild(number)
         sheet.appendChild(el)
       }
       sheets.push(sheet)
