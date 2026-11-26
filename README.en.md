@@ -21,7 +21,13 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="860" alt="WordLite screenshot">
+  <img src="docs/screenshot.png" width="860" alt="WordLite screenshot: A4 pagination, header/footer, page numbers and the current toolbar">
+</p>
+
+<p align="center">
+  <img src="docs/screenshot-pagination.png" width="860" alt="WordLite pagination: footer page number, page gap and the next page header">
+  <br>
+  <sub>Screen pagination, header/footer and page numbers; print preview and PDF share the same break positions.</sub>
 </p>
 
 > The user interface is currently in Simplified Chinese only.
@@ -57,6 +63,7 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 
 > On macOS 13 / 14 you can also hold <kbd>Control</kbd>, click the icon and choose "Open"; macOS 15 removed that shortcut, so use System Settings.
 > Requires macOS 13 Ventura or later (Safari 16 WebKit or newer).
+> The v1.2.0 macOS build has passed CI; this Release currently ships Windows first, and the Mac dmg will be added to the same Release.
 > To build it yourself on a Mac, see "Run from source" below.
 
 ## Features
@@ -65,13 +72,14 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 | --- | --- |
 | Files | Open / save DOCX and TXT (auto-detects UTF-8, UTF-16, GBK), open via double-click / "Open with" / drag-and-drop, recent files, autosave and crash recovery |
 | Editing | Find / replace, case-sensitive search, highlight all matches and jump between them; drag selected text to another spot (Ctrl+drag copies it), drag images within the document flow |
-| Windows | In-app opens stay in the current window (Save / Don't save / Cancel when modified); drops and "Open with" open a separate window |
-| Text | Font, size, color, highlight, bold, italic, underline, strikethrough, super/subscript, letter spacing, format painter |
-| Paragraphs | Headings 1–3, alignment, indent, line height, spacing before/after, bulleted and numbered lists |
+| Windows | In-app opens stay in the current window (Save / Don't save / Cancel when modified); drops and "Open with" open a separate window; 10%–1000% page zoom (Ctrl+wheel / trackpad pinch / status bar) |
+| Text | Font, size (the dropdown shows the actual default), color, highlight, bold, italic, underline, strikethrough, super/subscript, letter spacing, format painter |
+| Paragraphs | Headings 1–3, alignment, indent, line height (multiple / fixed points), spacing before/after (points), bulleted and numbered lists, paragraph settings dialog |
 | Tables | Insert, drag column widths, merge / split cells, cell shading, border width and color |
 | Images | Insert, drag to move, precise resize, left / center / right align, text wrapping (square / top-and-bottom), visual crop, side panel with live preview and one-step undo, full-size viewer, replace, delete |
-| Page | Paper size, orientation, custom margins, page background, page breaks |
-| Output | Print (Ctrl+P opens the system print dialog directly, where you set page range, copies and preview), export to PDF |
+| Page | A4 screen pagination (line-level breaks, headings kept with the next paragraph, tables / images kept intact), continuous reading (double-click the page gap), paper size, orientation, custom margins, paper color, three page-number modes (off / screen only / screen + print), header and footer, line/block breaking, page setup, manual page breaks |
+| Interface | Single-row toolbar; bottom-right detailed tools panel (docked on wide windows, floating on narrow ones); actual default labels for font and size; page count and continuous-reading status |
+| Output | Print (Ctrl+P opens the system print dialog directly, where you set page range, copies and preview), export to PDF; screen / print preview / PDF share the same pagination breaks; closing the document window is blocked while the print panel is open |
 
 <details>
 <summary><b>Keyboard shortcuts</b> (also available in the app with <kbd>F1</kbd>, or <kbd>⌘?</kbd> on macOS)</summary>
@@ -84,7 +92,8 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 | Context menu | <kbd>Shift+F10</kbd> or the Menu key | <kbd>⇧F10</kbd> |
 | Bold / Italic / Underline | <kbd>Ctrl+B</kbd> / <kbd>Ctrl+I</kbd> / <kbd>Ctrl+U</kbd> | <kbd>⌘B</kbd> / <kbd>⌘I</kbd> / <kbd>⌘U</kbd> |
 | Strikethrough | <kbd>Ctrl+Shift+X</kbd> | <kbd>⇧⌘X</kbd> |
-| Superscript / Subscript | <kbd>Ctrl+Shift+=</kbd> / <kbd>Ctrl+=</kbd> | <kbd>⇧⌘=</kbd> / <kbd>⌘=</kbd> |
+| Superscript / Subscript (superscript via toolbar) | — / <kbd>Ctrl+=</kbd> | — / <kbd>⌘=</kbd> |
+| Page zoom in / out | <kbd>Ctrl+Shift+=</kbd> / <kbd>Ctrl+Shift+-</kbd> | <kbd>⇧⌘=</kbd> / <kbd>⇧⌘-</kbd> |
 | Increase / Decrease font size | <kbd>Ctrl+Shift+&gt;</kbd> / <kbd>Ctrl+Shift+&lt;</kbd> | <kbd>⇧⌘&gt;</kbd> / <kbd>⇧⌘&lt;</kbd> |
 | Format painter: copy / apply | <kbd>Ctrl+Shift+C</kbd> / <kbd>Ctrl+Shift+V</kbd> | <kbd>⇧⌘C</kbd> / <kbd>⇧⌘V</kbd> |
 | Heading 1 / 2 / 3 / Body | <kbd>Ctrl+1</kbd> / <kbd>Ctrl+2</kbd> / <kbd>Ctrl+3</kbd> / <kbd>Ctrl+0</kbd> | <kbd>⌘1</kbd> / <kbd>⌘2</kbd> / <kbd>⌘3</kbd> / <kbd>⌘0</kbd> |
@@ -186,13 +195,14 @@ docs/                   README screenshot and migration notes
 
 ## Known limitations
 
-- Packaged and tested on Windows 10 / 11 and macOS 13 Ventura or later (both Apple silicon and Intel); older macOS versions are untested
+- Packaged and tested on Windows 10 / 11 and macOS 13 Ventura or later (the v1.2.0 Universal build passed three self-test suites on macOS CI; Intel hardware has not been re-tested, and older macOS versions are untested)
 - Choosing Quit from the Dock icon's context menu, logging out or shutting down exits without a save prompt; unsaved work is recovered from autosave when you reopen the app
 - The macOS build is ad-hoc signed and not notarized, so the first launch needs the steps under "Download"; the Windows build is not code-signed either
+- On macOS, pagination, continuous reading, paragraphs and PDF page counts pass CI; the physical print panel and the actual position of @page header/footer/page numbers have not been visually checked on a physical Mac
 - Text boxes, nested tables and complex fields are simplified on DOCX import
 - DOCX import restores only direct run formatting: `w:color` text colour, `w:highlight` highlighter and run-level `w:shd` character shading. Theme colours use the cached value in `w:color/@w:val` (a theme colour with no cached value is not restored); colours defined in character or paragraph styles and paragraph shading are not restored. When a run cannot be aligned with confidence it is left uncoloured, so colour never lands on the wrong characters
 - Image text wrapping supports inline, square (left / right) and top-and-bottom; tight, through, behind-text and in-front-of-text wrapping is simplified on import with a warning
-- Dragging text and images, and adjusting the crop box, work with a mouse only; touch long-press dragging and wheel zoom / panning inside the crop box are postponed to v1.2 (touch pens untested)
+- Dragging text and images, and adjusting the crop box, work with a mouse only; touch long-press dragging and wheel zoom / panning inside the crop box are not implemented yet (touch pens untested)
 - The image viewer is read-only: no previous / next image, no saving the image, and no pinch zoom (a trackpad pinch goes through Ctrl+wheel)
 
 ## FAQ
