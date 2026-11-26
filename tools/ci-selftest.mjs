@@ -11,9 +11,11 @@ const REQUIRED_BOOL = [
   'pagePinchPreview', 'pagePinchCommits', 'pagePinchIgnoresDialog', 'pagePinchWheel',
   // 屏幕分页：多页、页缝无字、不改文档、双击收起/恢复
   'pagePagination', 'pagePaginationNoGapText', 'pagePaginationModel',
-  'pagePaginationCollapse', 'pagePaginationRestore',
+  'pagePaginationCollapse', 'pagePaginationRestore', 'pageNumberDefaultOff', 'pageSetupDialog',
   // 段落设置：对话框能开/关、固定值 20 磅、段前段后 12/8 磅
-  'paragraphDialog', 'paragraphExactLine', 'paragraphSpacing'
+  'paragraphDialog', 'paragraphExactLine', 'paragraphSpacing',
+  // 默认字体/字号标签、打印关闭保护命令
+  'defaultFormatLabels', 'printingGuard'
 ]
 const REQUIRED_VALUE = {
   state: 'ok',

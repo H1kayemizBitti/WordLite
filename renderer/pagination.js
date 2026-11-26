@@ -13,6 +13,7 @@ export const paginationKey = new PluginKey('wordlitePagination')
 
 const EPS = 0.5
 const MAX_PAGES = 5000
+const READING_MARKER_HEIGHT = 26
 const TEXT_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE'])
 
 export const Pagination = Extension.create({
@@ -38,7 +39,7 @@ export const Pagination = Extension.create({
 
 // 把正文里的块摊平成可排的“行”和“不可拆块”。
 // 文本块按行算，图片段落/表格/水平线/手动分页符整块算。
-function collectBlocks (root) {
+function collectBlocks (root, lineBreaking) {
   const blocks = []
   const walk = (parent) => {
     for (const el of parent.children) {
@@ -56,9 +57,10 @@ function collectBlocks (root) {
         continue
       }
       if (TEXT_BLOCKS.has(tag)) {
-        // 标题整块不拆；有图（含缩放容器）的段落也不拆：图片按整段跟着走
+        // 标题整块不拆；有图（含缩放容器）的段落也不拆：图片按整段跟着走。
+        // “整段不拆”分页方式下所有文本块都按整块排。
         const heading = /^H[1-6]$/.test(tag)
-        const atomic = heading || !!el.querySelector('img, [data-resize-container]')
+        const atomic = !lineBreaking || heading || !!el.querySelector('img, [data-resize-container]')
         blocks.push({ el, atomic, heading })
         continue
       }
@@ -152,14 +154,24 @@ function lineStartPos (view, el, lineIndex, spacing, top, paperTop, scale) {
   return posBeforeBlock(view, el)
 }
 
-function setDecorations (view, breaks) {
+function setDecorations (view, breaks, reading = false, showPageNumbers = false) {
   const decorations = []
   for (const item of breaks) {
     const dom = document.createElement('span')
-    dom.className = item.forced ? 'page-gap-widget page-gap-widget-forced' : 'page-gap-widget'
+    const marker = reading && !item.forced
+    dom.className = 'page-gap-widget' +
+      (item.forced ? ' page-gap-widget-forced' : '') +
+      (marker ? ' page-break-marker' : '')
     dom.contentEditable = 'false'
     dom.setAttribute('aria-hidden', 'true')
-    dom.style.height = `${Math.max(0, item.height).toFixed(2)}px`
+    const height = reading ? (item.forced ? 0 : READING_MARKER_HEIGHT) : Math.max(0, item.height)
+    dom.style.height = `${height.toFixed(2)}px`
+    if (marker && showPageNumbers && item.pageNumber) {
+      const label = document.createElement('span')
+      label.className = 'page-break-marker-label'
+      label.textContent = `第 ${item.pageNumber} 页`
+      dom.appendChild(label)
+    }
     decorations.push(Decoration.widget(item.pos, dom, { side: -1 }))
   }
   const set = DecorationSet.create(view.state.doc, decorations)
@@ -171,6 +183,10 @@ export function createPaginator ({
   getGeometry,
   getGap,
   getScale = () => 1,
+  getReadingMode = () => false,
+  getPageNumberMode = () => 'none',
+  getHeaderFooter = () => ({}),
+  getLineBreaking = () => true,
   onPageUpdate = null,
   shouldDefer = null,
   scheduleDelay = 180
@@ -197,10 +213,10 @@ export function createPaginator ({
   }
 
   // 第一次编排：在干净布局上量每一行，算出每页断在哪
-  function computeBreaks (geom, scale) {
+  function computeBreaks (geom, scale, lineBreaking) {
     const paperRect = paper.getBoundingClientRect()
     const paperTop = paperRect.top
-    const blocks = collectBlocks(editor.view.dom)
+    const blocks = collectBlocks(editor.view.dom, lineBreaking)
     const items = []
     for (const block of blocks) {
       const rect = block.el.getBoundingClientRect()
@@ -280,6 +296,7 @@ export function createPaginator ({
             height: delta,
             target,
             forced: true,
+            pageNumber: page + 2,
             el: item.el,
             lineIndex: item.lineIndex,
             boundary: item.lineIndex === 0 || item.kind === 'atomic'
@@ -314,6 +331,7 @@ export function createPaginator ({
                 pos: posBeforeBlock(editor.view, anchor.el),
                 height: delta,
                 target,
+                pageNumber: page + 2,
                 el: anchor.el,
                 lineIndex: 0,
                 boundary: true
@@ -343,6 +361,7 @@ export function createPaginator ({
                 pos,
                 height: delta,
                 target,
+                pageNumber: page + 2,
                 el: item.el,
                 lineIndex: item.lineIndex,
                 boundary: item.lineIndex === 0 || item.kind === 'atomic'
@@ -406,6 +425,18 @@ export function createPaginator ({
     const totalHeight = pageCount * geom.pageHeight + (pageCount - 1) * geom.gap
     paper.style.minHeight = `${totalHeight.toFixed(2)}px`
 
+    const pageNumberMode = getPageNumberMode()
+    const showNumber = pageNumberMode !== 'none'
+    const hf = getHeaderFooter() || {}
+    const header = String(hf.header || '').trim()
+    const footer = String(hf.footer || '').trim()
+    const align = hf.align || 'center'
+    const fontSize = hf.fontSize || 9
+    const fontFamily = '"等线","Microsoft YaHei","PingFang SC",sans-serif'
+    const common = 'position:absolute;' +
+      `text-align:${align};font-size:${fontSize}pt;font-family:${fontFamily};` +
+      'color:#595959;line-height:1.35;pointer-events:none;user-select:none;white-space:pre-wrap;'
+
     const sheets = []
     for (let i = 0; i < pageCount; i += 1) {
       const sheet = document.createElement('div')
@@ -413,10 +444,33 @@ export function createPaginator ({
       sheet.style.top = `${(i * (geom.pageHeight + geom.gap)).toFixed(2)}px`
       sheet.style.height = `${geom.pageHeight.toFixed(2)}px`
       if (geom.background) sheet.style.background = geom.background
-      const number = document.createElement('span')
-      number.className = 'page-sheet-number'
-      number.textContent = String(i + 1)
-      sheet.appendChild(number)
+      if (header) {
+        const el = document.createElement('div')
+        el.className = 'page-sheet-header'
+        el.textContent = header
+        el.style.cssText = common +
+          `left:${geom.marginLeft}px;right:${geom.marginRight}px;top:${geom.marginTop / 2}px;transform:translateY(-50%);`
+        sheet.appendChild(el)
+      }
+      if (footer || showNumber) {
+        const el = document.createElement('div')
+        el.className = 'page-sheet-footer'
+        el.style.cssText = common +
+          `left:${geom.marginLeft}px;right:${geom.marginRight}px;bottom:${geom.marginBottom / 2}px;transform:translateY(50%);`
+        if (footer) {
+          const text = document.createElement('span')
+          text.className = 'page-sheet-footer-text'
+          text.textContent = footer
+          el.appendChild(text)
+        }
+        if (showNumber) {
+          const number = document.createElement('span')
+          number.className = 'page-sheet-footer-number'
+          number.textContent = String(i + 1)
+          el.appendChild(number)
+        }
+        sheet.appendChild(el)
+      }
       sheets.push(sheet)
     }
     layer.replaceChildren(...sheets)
@@ -433,6 +487,8 @@ export function createPaginator ({
     running = true
     try {
       const scale = getScale() || 1
+      const reading = !!getReadingMode()
+      const lineBreaking = getLineBreaking() !== false
       const geom = { ...getGeometry(), gap: getGap() }
 
       // 关键：清空旧间隔、量、再一次性写回，全部在同一个任务里完成。
@@ -440,26 +496,49 @@ export function createPaginator ({
       clearDecorations()
       paper.getBoundingClientRect()
 
-      const first = computeBreaks(geom, scale)
-      let breaks = first.breaks
+      // 连续阅读也先按正常纸张算断点，保证页码和打印分页同一套
+      const first = computeBreaks(geom, scale, lineBreaking)
+      const breaks = first.breaks
       lastBreaks = breaks
-      setDecorations(editor.view, breaks)
-      paper.getBoundingClientRect()
+      const showNumbers = getPageNumberMode() !== 'none'
 
-      // 落点误差校正，最多两轮
-      for (let i = 0; i < 2; i += 1) {
-        if (!correctBreaks(breaks, scale)) break
-        setDecorations(editor.view, breaks)
+      if (reading) {
+        // 连续阅读：删掉页边距和页缝，只在断点留一条 26px 的分页标记；
+        // 文字上下接起来，方便顺着读。
+        setDecorations(editor.view, breaks, true, showNumbers)
+        const paperTop = paper.getBoundingClientRect().top
+        bands = Array.from(editor.view.dom.querySelectorAll('.page-break-marker, .page-break')).map((el) => {
+          const rect = el.getBoundingClientRect()
+          return { top: (rect.top - paperTop) / scale, bottom: (rect.bottom - paperTop) / scale }
+        })
+        pageCount = first.pageCount
+        if (layer) layer.replaceChildren()
+        paper.classList.add('reading-mode')
+        paper.classList.remove('paginated')
+        const contentHeight = editor.view.dom.getBoundingClientRect().height / scale
+        paper.style.minHeight =
+          `${(geom.marginTop + contentHeight + geom.marginBottom).toFixed(2)}px`
+        if (onPageUpdate) onPageUpdate({ pageCount, bands, readingMode: true })
+      } else {
+        setDecorations(editor.view, breaks, false, showNumbers)
         paper.getBoundingClientRect()
-      }
 
-      bands = breaks.map((item) => ({
-        top: item.target - item.height,
-        bottom: item.target
-      }))
-      renderPages(geom, first.pageCount)
-      paper.classList.add('paginated')
-      if (onPageUpdate) onPageUpdate({ pageCount, bands })
+        // 落点误差校正，最多两轮
+        for (let i = 0; i < 2; i += 1) {
+          if (!correctBreaks(breaks, scale)) break
+          setDecorations(editor.view, breaks, false, showNumbers)
+          paper.getBoundingClientRect()
+        }
+
+        bands = breaks.map((item) => ({
+          top: item.target - item.height,
+          bottom: item.target
+        }))
+        renderPages(geom, first.pageCount)
+        paper.classList.remove('reading-mode')
+        paper.classList.add('paginated')
+        if (onPageUpdate) onPageUpdate({ pageCount, bands, readingMode: false })
+      }
     } finally {
       running = false
     }

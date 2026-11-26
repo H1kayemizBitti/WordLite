@@ -49,6 +49,8 @@
     // 关闭确认里选了「取消」：通知 Rust 中止退出流程；Windows 上该命令什么也不做
     closeCancelled: () => invoke('close_cancelled'),
     print: () => invoke('print_document'),
+    // 打印面板打开期间由 Rust 挡住窗口关闭；渲染层用这个标志告诉原生层
+    setPrintingMode: (printing) => invoke('set_printing_mode', { printing }),
     exportPdf: (defaultPath) => invoke('export_pdf', { defaultPath, page: pageMetrics() }),
     printToPDF: () => invoke('print_to_pdf', { page: pageMetrics() }),
     onSaveBeforeClose: (callback) => {

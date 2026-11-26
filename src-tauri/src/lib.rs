@@ -15,6 +15,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
 struct WindowDocState {
     dirty: bool,
     allow_close: bool,
+    printing: bool,
     pending_open: Option<String>,
     // 窗口里现在是什么文档（未命名 = 这张纸还没被用过，可以拿来接从访达打开的文件）
     file_name: Option<String>,
@@ -864,6 +865,14 @@ fn close_after_save(window: tauri::WebviewWindow, state: State<AppState>) -> Res
     let label = window.label().to_string();
     state.update(&label, |doc| doc.allow_close = true);
     window.close().map_err(|e| e.to_string())
+}
+
+// 打印面板打开期间挡住窗口关闭：WebView2 的打印页不是本窗口的模态子窗，
+// 用户很容易顺手点右上角 X 把整个文档窗口关掉。渲染层在打印前后上报这个标志。
+#[tauri::command]
+fn set_printing_mode(window: tauri::WebviewWindow, state: State<AppState>, printing: bool) {
+    let label = window.label().to_string();
+    state.update(&label, |doc| doc.printing = printing);
 }
 
 // 打印走系统打印面板；macOS 用 WKWebView 自带的打印（eval window.print() 在 WKWebView 里不弹面板）
@@ -1834,18 +1843,26 @@ pub fn run() {
                                 results.pagePaginationNoGapText = pageInGap === 0;
                                 results.pagePaginationModel = pageEditor.state.doc.textContent.length === pageSample.length &&
                                     !JSON.stringify(pageEditor.getJSON()).includes('page-gap-widget');
+                                const paperForPage = editorEl.closest('.paper');
                                 window.__wordlitePagination.toggleGap();
-                                await new Promise((resolve) => setTimeout(resolve, 500));
+                                await new Promise((resolve) => setTimeout(resolve, 600));
                                 const foldedState = window.__wordlitePagination.state();
-                                const foldedRects = Array.from(document.querySelectorAll('.page-sheet')).map((el) => el.getBoundingClientRect());
-                                const foldedGap = foldedRects.length > 1 ? foldedRects[1].top - foldedRects[0].bottom : 999;
+                                const foldedMarkers = document.querySelectorAll('.page-break-marker').length;
+                                const foldedSheets = document.querySelectorAll('.page-sheet').length;
+                                results.pagePaginationCollapse = foldedState.collapsed === true &&
+                                    paperForPage.classList.contains('reading-mode') &&
+                                    foldedSheets === 0 && foldedMarkers === foldedState.pageCount - 1;
                                 window.__wordlitePagination.toggleGap();
-                                await new Promise((resolve) => setTimeout(resolve, 500));
+                                await new Promise((resolve) => setTimeout(resolve, 600));
                                 const restoredState = window.__wordlitePagination.state();
                                 const restoredRects = Array.from(document.querySelectorAll('.page-sheet')).map((el) => el.getBoundingClientRect());
                                 const restoredGap = restoredRects.length > 1 ? restoredRects[1].top - restoredRects[0].bottom : 0;
-                                results.pagePaginationCollapse = foldedState.collapsed === true && Math.abs(foldedGap) < 1.5;
-                                results.pagePaginationRestore = restoredState.collapsed === false && restoredGap > 10;
+                                results.pagePaginationRestore = restoredState.collapsed === false &&
+                                    !paperForPage.classList.contains('reading-mode') &&
+                                    restoredRects.length === restoredState.pageCount && restoredGap > 10;
+                                results.pageNumberDefaultOff = document.querySelector('#quickPageNumber').value === 'none' &&
+                                    document.querySelectorAll('.page-sheet-footer-number').length === 0;
+                                results.pageSetupDialog = !!document.querySelector('#pageSetupDialog');
                             }} catch (pageError) {{
                                 results.pagePaginationError = String(pageError);
                             }}
@@ -1881,6 +1898,26 @@ pub fn run() {
                                     paragraphStyle.marginBottom === '10.6667px';
                             }} catch (paragraphError) {{
                                 results.paragraphError = String(paragraphError);
+                            }}
+                            // 默认字体/字号标签 + 打印关闭保护命令
+                            try {{
+                                const fontDefault = document.querySelector('#fontFamily').options[0].textContent;
+                                const sizeDefault = document.querySelector('#fontSize').options[0].textContent;
+                                results.defaultFormatLabels = fontDefault.includes('（默认）') &&
+                                    fontDefault !== '字体：默认' &&
+                                    sizeDefault.includes('（默认）') &&
+                                    sizeDefault !== '字号：默认';
+                            }} catch (labelError) {{
+                                results.defaultFormatLabels = false;
+                                results.labelError = String(labelError);
+                            }}
+                            try {{
+                                await window.wordlite.file.setPrintingMode(true);
+                                await window.wordlite.file.setPrintingMode(false);
+                                results.printingGuard = true;
+                            }} catch (printingError) {{
+                                results.printingGuard = false;
+                                results.printingGuardError = String(printingError);
                             }}
                             try {{
                                 await withTimeout(window.__TAURI__.core.invoke('open_external', {{ path: {probe} }}), 5000);
@@ -2366,6 +2403,7 @@ pub fn run() {
             renderer_ready,
             close_cancelled,
             close_after_save,
+            set_printing_mode,
             print_document,
             print_to_pdf,
             export_pdf,
@@ -2377,7 +2415,14 @@ pub fn run() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let state = window.state::<AppState>();
                 let label = window.label().to_string();
-                let (allow, dirty) = state.update(&label, |doc| (doc.allow_close, doc.dirty));
+                let (allow, dirty, printing) = state.update(&label, |doc| {
+                    (doc.allow_close, doc.dirty, doc.printing)
+                });
+                // 打印面板开着时，右上角的 X 不能把文档窗口关掉
+                if printing {
+                    api.prevent_close();
+                    return;
+                }
                 if !allow && dirty {
                     api.prevent_close();
                     let _ = window.emit_to(

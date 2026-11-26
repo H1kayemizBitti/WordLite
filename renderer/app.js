@@ -197,7 +197,16 @@ function normalizePageSetup (input = {}) {
     margins[side] = Math.round(clamp(source[side], 0, 10, base[side]) * 100) / 100
   }
   const background = /^#[0-9a-f]{6}$/i.test(setup.background || '') ? setup.background.toLowerCase() : '#ffffff'
-  return { size, orientation, margin: preset, margins, background }
+  const pageNumber = ['none', 'screen', 'print'].includes(setup.pageNumber) ? setup.pageNumber : 'none'
+  const headerText = typeof setup.headerText === 'string' ? setup.headerText.slice(0, 120) : ''
+  const footerText = typeof setup.footerText === 'string' ? setup.footerText.slice(0, 120) : ''
+  const headerFooterAlign = ['left', 'center', 'right'].includes(setup.headerFooterAlign) ? setup.headerFooterAlign : 'center'
+  const headerFooterFontSize = Math.round(clamp(setup.headerFooterFontSize, 6, 24, 9) * 2) / 2
+  const lineBreaking = setup.lineBreaking === 'blocks' ? 'blocks' : 'lines'
+  return {
+    size, orientation, margin: preset, margins, background,
+    pageNumber, headerText, footerText, headerFooterAlign, headerFooterFontSize, lineBreaking
+  }
 }
 
 function pageSetupFromSettings () {
@@ -508,6 +517,21 @@ SIZES.forEach((s) => fontSizeSel.add(new Option(s, s)))
 fontSizeSel.add(new Option('字号：默认', ''), 0)
 fontSizeSel.value = ''
 
+// 中文字号名只在常用磅值上标；没有对应名称就直接写磅
+const SIZE_NAMES = {
+  9: '小五', 10.5: '五号', 12: '小四', 14: '四号', 16: '三号',
+  18: '小二', 22: '二号', 24: '小一', 26: '一号', 36: '小初'
+}
+
+function updateDefaultFormatLabels () {
+  const font = FONTS.find((item) => item.value === settings.fontFamily) || FONTS[0]
+  fontFamilySel.options[0].textContent = `字体：${font.label}（默认）`
+  const sizeName = SIZE_NAMES[Number(settings.fontSize)]
+  fontSizeSel.options[0].textContent = `字号：${sizeName ? sizeName : `${settings.fontSize} 磅`}（默认）`
+}
+
+updateDefaultFormatLabels()
+
 const settingsFontSel = document.querySelector('#settingsFont')
 const settingsFontSizeSel = document.querySelector('#settingsFontSize')
 FONTS.forEach((f) => settingsFontSel.add(new Option(f.label, f.value)))
@@ -651,6 +675,92 @@ document.querySelector('#paragraphForm').addEventListener('submit', (event) => {
   chain.setBlockSpacing({ spacingBefore: before, spacingAfter: after }).run()
   paragraphDialog.close()
   syncToolbar()
+})
+
+/* ---------------- 页面设置对话框 ---------------- */
+
+const pageSetupDialog = document.querySelector('#pageSetupDialog')
+const setupPageSize = document.querySelector('#setupPageSize')
+const setupOrientation = document.querySelector('#setupOrientation')
+const setupMarginPreset = document.querySelector('#setupMarginPreset')
+const setupBackground = document.querySelector('#setupBackground')
+const setupPageNumber = document.querySelector('#setupPageNumber')
+const setupHeaderText = document.querySelector('#setupHeaderText')
+const setupFooterText = document.querySelector('#setupFooterText')
+const setupHeaderFooterAlign = document.querySelector('#setupHeaderFooterAlign')
+const setupHeaderFooterSize = document.querySelector('#setupHeaderFooterSize')
+const setupLineBreaking = document.querySelector('#setupLineBreaking')
+const setupReadingMode = document.querySelector('#setupReadingMode')
+const setupMarginInputs = {}
+for (const side of ['top', 'right', 'bottom', 'left']) {
+  setupMarginInputs[side] = document.querySelector(`#setupMargin${side[0].toUpperCase()}${side.slice(1)}`)
+}
+
+function fillSetupMargins (margins) {
+  for (const side of ['top', 'right', 'bottom', 'left']) {
+    setupMarginInputs[side].value = margins[side]
+  }
+}
+
+function openPageSetupDialog () {
+  const margins = currentMargins()
+  setupPageSize.value = pageSetup.size
+  setupOrientation.value = pageSetup.orientation
+  setupMarginPreset.value = pageSetup.margin
+  fillSetupMargins(margins)
+  setupBackground.value = pageSetup.background
+  setupPageNumber.value = pageSetup.pageNumber
+  setupHeaderText.value = pageSetup.headerText
+  setupFooterText.value = pageSetup.footerText
+  setupHeaderFooterAlign.value = pageSetup.headerFooterAlign
+  setupHeaderFooterSize.value = pageSetup.headerFooterFontSize
+  setupLineBreaking.value = pageSetup.lineBreaking
+  setupReadingMode.value = pageGapCollapsed ? 'reading' : 'pages'
+  if (!pageSetupDialog.open) pageSetupDialog.showModal()
+}
+
+document.querySelector('#btnPageSetup').addEventListener('click', openPageSetupDialog)
+document.querySelectorAll('[data-page-setup]').forEach((button) => {
+  button.addEventListener('click', openPageSetupDialog)
+})
+document.querySelector('#btnCancelPageSetup').addEventListener('click', () => pageSetupDialog.close())
+
+setupMarginPreset.addEventListener('change', () => {
+  if (setupMarginPreset.value === 'custom') return
+  const preset = PAGE_MARGINS[setupMarginPreset.value]
+  if (preset) fillSetupMargins(preset)
+})
+for (const input of Object.values(setupMarginInputs)) {
+  input.addEventListener('input', () => {
+    if (setupMarginPreset.value !== 'custom') setupMarginPreset.value = 'custom'
+  })
+}
+
+document.querySelector('#quickPageNumber').addEventListener('change', (event) => {
+  setPageSetup({ pageNumber: event.target.value })
+})
+
+document.querySelector('#pageSetupForm').addEventListener('submit', (event) => {
+  event.preventDefault()
+  const margins = {}
+  for (const side of ['top', 'right', 'bottom', 'left']) {
+    margins[side] = clamp(setupMarginInputs[side].value, 0, 10, 2.54)
+  }
+  setPageSetup({
+    size: setupPageSize.value,
+    orientation: setupOrientation.value,
+    margin: setupMarginPreset.value,
+    margins,
+    background: setupBackground.value,
+    pageNumber: setupPageNumber.value,
+    headerText: setupHeaderText.value,
+    footerText: setupFooterText.value,
+    headerFooterAlign: setupHeaderFooterAlign.value,
+    headerFooterFontSize: setupHeaderFooterSize.value,
+    lineBreaking: setupLineBreaking.value
+  })
+  setReadingMode(setupReadingMode.value === 'reading')
+  pageSetupDialog.close()
 })
 
 /* ---------------- 工具按钮 ---------------- */
@@ -3050,6 +3160,46 @@ function currentMargins (setup = pageSetup) {
   return setup.margins || PAGE_MARGINS[setup.margin] || PAGE_MARGINS.normal
 }
 
+function cssQuoted (text) {
+  return `"${String(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, ' ')}"`
+}
+
+// 打印页的页眉/页脚/页码写在 @page 的页边距盒子里；屏幕页层用同样的内容画。
+// 六个盒子都显式声明，WebView2 才不会再加自己的日期/标题/网址页眉页脚。
+function buildPrintPageStyle (dimensions, margins) {
+  const align = pageSetup.headerFooterAlign
+  const position = align === 'left' ? 'left' : align === 'right' ? 'right' : 'center'
+  const header = pageSetup.headerText.trim()
+  const footer = pageSetup.footerText.trim()
+  const printNumber = pageSetup.pageNumber === 'print'
+  const base = `font-size:${pageSetup.headerFooterFontSize}pt;color:#595959;font-family:"等线","Microsoft YaHei","PingFang SC",sans-serif;`
+  const boxes = []
+  for (const side of ['top', 'bottom']) {
+    for (const pos of ['left', 'center', 'right']) {
+      const name = `${side}-${pos}`
+      let content = '""'
+      let extra = ''
+      if (side === 'top' && pos === position && header) {
+        content = cssQuoted(header)
+      }
+      if (side === 'bottom' && pos === position) {
+        if (footer && printNumber) {
+          content = `${cssQuoted(footer)} "\\A" counter(page)`
+          extra = 'white-space:pre;'
+        } else if (footer) {
+          content = cssQuoted(footer)
+        } else if (printNumber) {
+          content = 'counter(page)'
+        }
+      }
+      boxes.push(`@${name} { content:${content}; ${base}${extra ? ` ${extra}` : ''} }`)
+    }
+  }
+  return `@page { size: ${dimensions.width}cm ${dimensions.height}cm; ` +
+    `margin: ${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm; ` +
+    `${boxes.join(' ')} }`
+}
+
 function applyPageSetup () {
   const dimensions = pageDimensions()
   const margins = currentMargins()
@@ -3078,18 +3228,19 @@ function applyPageSetup () {
     const id = `#margin${side[0].toUpperCase()}${side.slice(1)}`
     document.querySelector(id).value = margins[side]
   }
-  // 显式声明空的页边距盒子：Chromium/WebView2 只要看到 @page 里有页边距盒子，
-  // 就不再画自己的页眉页脚（否则会印出日期、标题和 tauri.localhost 网址）。
-  document.querySelector('#printPageStyle').textContent =
-    `@page { size: ${dimensions.width}cm ${dimensions.height}cm; margin: ${margins.top}cm ${margins.right}cm ${margins.bottom}cm ${margins.left}cm; ` +
-    '@top-left { content: ""; } @top-center { content: ""; } @top-right { content: ""; } ' +
-    '@bottom-left { content: ""; } @bottom-center { content: ""; } @bottom-right { content: ""; } }'
+  // 页眉/页脚/页码写进 @page 页边距盒子；屏幕页层跟着用同样的内容
+  document.querySelector('#printPageStyle').textContent = buildPrintPageStyle(dimensions, margins)
+  const quickNumber = document.querySelector('#quickPageNumber')
+  if (quickNumber) quickNumber.value = pageSetup.pageNumber
   // 纸张尺寸/边距变了，所有页缝位置都要重算
   paginator?.force(0)
 }
 
 function setPageSetup (patch) {
-  pageSetup = normalizePageSetup({ ...pageSetup, ...patch })
+  const next = normalizePageSetup({ ...pageSetup, ...patch })
+  // 值没变就不动，免得只切“连续阅读”也把文档标成未保存
+  if (JSON.stringify(next) === JSON.stringify(pageSetup)) return
+  pageSetup = next
   applyPageSetup()
   setDirty(true)
 }
@@ -3278,8 +3429,9 @@ function isPinchWheel (event) {
 // 跟手：基础灵敏度比旧版高，再按「单位时间移动量」加一个速度增益——
 // 慢捏微调，快捏一次走得多。参数都可调。
 const PINCH_BASE = 0.004
-const PINCH_SPEED_GAIN = 4.5
-const PINCH_GAIN_MAX = 5
+// 速度增益只做轻微加速：快捏不再一次冲很远，减少“跟不上手”的感觉
+const PINCH_SPEED_GAIN = 1.8
+const PINCH_GAIN_MAX = 2.2
 let wheelZoomTimer = 0
 let wheelZoomTarget = null
 let wheelLastAt = 0
@@ -3374,20 +3526,31 @@ paginator = createPaginator({
   getGeometry: paginationGeometry,
   getGap: () => pageGapCollapsed ? 0 : PAGE_GAP_DEFAULT,
   getScale: () => renderedZoom / 100,
+  getReadingMode: () => pageGapCollapsed,
+  getPageNumberMode: () => pageSetup.pageNumber,
+  getHeaderFooter: () => ({
+    header: pageSetup.headerText,
+    footer: pageSetup.footerText,
+    align: pageSetup.headerFooterAlign,
+    fontSize: pageSetup.headerFooterFontSize
+  }),
+  getLineBreaking: () => pageSetup.lineBreaking !== 'blocks',
   shouldDefer: () => !!imageEdit || imageViewer.open || inCropMode(),
-  onPageUpdate: ({ pageCount }) => {
-    const paper = document.querySelector('.paper')
-    paper?.classList.toggle('gaps-collapsed', pageGapCollapsed)
+  onPageUpdate: ({ pageCount, readingMode }) => {
     const status = document.querySelector('#pageStatus')
-    if (status) status.textContent = `共 ${pageCount} 页`
+    if (status) status.textContent = readingMode ? `连续阅读 · 共 ${pageCount} 页` : `共 ${pageCount} 页`
   }
 })
 
-function togglePageGap () {
-  pageGapCollapsed = !pageGapCollapsed
+function setReadingMode (collapsed) {
+  if (pageGapCollapsed === collapsed) return
+  pageGapCollapsed = collapsed
   storageWrite(PAGE_GAP_KEY, pageGapCollapsed)
-  document.querySelector('.paper')?.classList.toggle('gaps-collapsed', pageGapCollapsed)
   paginator.force(0)
+}
+
+function togglePageGap () {
+  setReadingMode(!pageGapCollapsed)
 }
 
 // 页缝命中测试：用纸面未缩放坐标和分页引擎记下的页缝带比对
@@ -3418,7 +3581,8 @@ function pageSheetGapHit (event) {
 }
 
 workspaceEl.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0 || !pageSheetGapHit(event)) return
+  if (event.button !== 0) return
+  if (!pageSheetGapHit(event) && !(pageGapCollapsed && pageGapHit(event))) return
   event.preventDefault()
   event.stopPropagation()
 }, true)
@@ -3646,6 +3810,7 @@ function applyDefaultStyles () {
   root.style.setProperty('--doc-font-family', settings.fontFamily)
   root.style.setProperty('--doc-font-size', `${settings.fontSize}pt`)
   root.style.setProperty('--doc-line-height', settings.lineHeight)
+  updateDefaultFormatLabels()
 }
 
 function scheduleAutoSave () {
@@ -4392,6 +4557,8 @@ function endPrint () {
   }
   if (!printing) return
   printing = false
+  document.body.classList.remove('printing')
+  fileApi.setPrintingMode?.(false)
   if (printRestoreFocus) {
     printRestoreFocus = false
     editor.commands.focus()
@@ -4406,21 +4573,28 @@ async function directPrint () {
   if (printing || document.querySelector('dialog[open]')) return
   printing = true
   printRestoreFocus = editor.view.hasFocus()
+  document.body.classList.add('printing')
+  // 原生层在打印期间挡住窗口关闭，免得点 X 把文档窗口关掉
+  try {
+    await fileApi.setPrintingMode?.(true)
+  } catch (error) {
+    console.error(error)
+  }
   // 最后一次编辑可能还在 180ms 防抖里；打印前强制重排，保证打印和屏幕同一套断点
   paginator?.runNow()
   try {
     await clearPrintFocus()
   } catch (error) {
-    printing = false
-    printRestoreFocus = false
     console.error(error)
+    endPrint()
     return
   }
   try {
     // Windows 上 eval("window.print()") 是异步返回的，afterprint 才是关闭信号；
-    // Mac 的 NSPrintPanel 可能不发 afterprint，3 秒后兜底复位，避免永远卡住
+    // Mac 的 NSPrintPanel 可能不发 afterprint，3 秒后兜底复位，避免永远卡住。
+    // Windows 的兜底放长：打印面板开着的时候不能提前解除关闭保护。
     await fileApi.print()
-    printFallbackTimer = setTimeout(endPrint, 3000)
+    printFallbackTimer = setTimeout(endPrint, isMac ? 3000 : 120000)
   } catch (error) {
     console.error(error)
     endPrint()
@@ -4436,6 +4610,8 @@ window.addEventListener('beforeprint', () => {
   if (printing) return
   printing = true
   printRestoreFocus = editor.view.hasFocus()
+  document.body.classList.add('printing')
+  fileApi.setPrintingMode?.(true)
   paginator?.runNow()
   clearPrintFocus().catch(() => {})
 })

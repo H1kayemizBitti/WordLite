@@ -127,6 +127,22 @@
         </div>
       </div>
       <div class="group">
+        <div class="group-title">页面</div>
+        <div class="group-body">
+          <div class="row">
+            <button class="tbtn" id="btnPageSetup" type="button" title="纸张、方向、页边距、页码、页眉页脚、分页方式">页面设置…</button>
+          </div>
+          <div class="row">
+            <label class="mini-label" for="quickPageNumber">页码</label>
+            <select id="quickPageNumber" class="select" title="页码显示与打印">
+              <option value="none">不显示</option>
+              <option value="screen">仅屏幕</option>
+              <option value="print">显示并打印</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="group">
         <div class="group-title">编辑</div>
         <div class="group-body">
           <div class="row">
@@ -230,6 +246,9 @@
             <label class="mini-label" for="marginLeft">左</label>
             <input id="marginLeft" class="num-input" data-margin-side="left" type="number" min="0" max="10" step="0.1" title="左边距（厘米）">
             <span class="unit">厘米</span>
+          </div>
+          <div class="row layout-row">
+            <button class="tbtn" data-page-setup type="button">页眉页脚 / 页码…</button>
           </div>
         </div>
       </div>
@@ -566,6 +585,103 @@
     <div class="dialog-foot">
       <span class="spacer"></span>
       <button class="tbtn" type="button" id="btnCancelParagraph">取消</button>
+      <button class="tbtn primary" type="submit">确定</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 页面设置 -->
+<dialog class="dialog page-setup-dialog" id="pageSetupDialog" aria-label="页面设置">
+  <div class="dialog-head">
+    <h2>页面设置</h2>
+    <button class="dialog-close" type="button" data-close-dialog="pageSetupDialog" aria-label="关闭">×</button>
+  </div>
+  <form id="pageSetupForm">
+    <div class="dialog-body">
+      <p class="dialog-note">纸张、页码、页眉页脚和分页方式都集中在这里。屏幕、打印预览和打印使用同一套断点。</p>
+
+      <h3>纸张</h3>
+      <div class="form-grid">
+        <label for="setupPageSize">纸张</label>
+        <select id="setupPageSize" class="select wide-select">
+          <option value="a4">A4</option>
+          <option value="a5">A5</option>
+          <option value="letter">Letter</option>
+        </select>
+        <label for="setupOrientation">方向</label>
+        <select id="setupOrientation" class="select wide-select">
+          <option value="portrait">纵向</option>
+          <option value="landscape">横向</option>
+        </select>
+        <label for="setupMarginPreset">页边距</label>
+        <select id="setupMarginPreset" class="select wide-select">
+          <option value="normal">普通</option>
+          <option value="narrow">窄</option>
+          <option value="wide">宽</option>
+          <option value="custom">自定义</option>
+        </select>
+        <label>自定义边距</label>
+        <div class="inline-field margin-fields">
+          <label for="setupMarginTop">上</label>
+          <input id="setupMarginTop" class="text-input short-input" type="number" min="0" max="10" step="0.01">
+          <label for="setupMarginRight">右</label>
+          <input id="setupMarginRight" class="text-input short-input" type="number" min="0" max="10" step="0.01">
+          <label for="setupMarginBottom">下</label>
+          <input id="setupMarginBottom" class="text-input short-input" type="number" min="0" max="10" step="0.01">
+          <label for="setupMarginLeft">左</label>
+          <input id="setupMarginLeft" class="text-input short-input" type="number" min="0" max="10" step="0.01">
+          <span class="unit">厘米</span>
+        </div>
+        <label for="setupBackground">纸色</label>
+        <input id="setupBackground" class="color-input" type="color" value="#ffffff" title="页面背景色">
+      </div>
+
+      <h3>页码</h3>
+      <div class="form-grid">
+        <label for="setupPageNumber">页码</label>
+        <select id="setupPageNumber" class="select wide-select">
+          <option value="none">不显示（默认）</option>
+          <option value="screen">仅屏幕显示，不打印</option>
+          <option value="print">显示并打印</option>
+        </select>
+      </div>
+
+      <h3>页眉页脚</h3>
+      <div class="form-grid">
+        <label for="setupHeaderText">页眉</label>
+        <input id="setupHeaderText" class="text-input" type="text" maxlength="120" placeholder="留空不显示">
+        <label for="setupFooterText">页脚</label>
+        <input id="setupFooterText" class="text-input" type="text" maxlength="120" placeholder="留空不显示">
+        <label for="setupHeaderFooterAlign">对齐</label>
+        <select id="setupHeaderFooterAlign" class="select wide-select">
+          <option value="left">左对齐</option>
+          <option value="center">居中</option>
+          <option value="right">右对齐</option>
+        </select>
+        <label for="setupHeaderFooterSize">字号</label>
+        <div class="inline-field">
+          <input id="setupHeaderFooterSize" class="text-input short-input" type="number" min="6" max="24" step="0.5" value="9">
+          <span class="unit">磅</span>
+        </div>
+      </div>
+
+      <h3>分页</h3>
+      <div class="form-grid">
+        <label for="setupLineBreaking">断行方式</label>
+        <select id="setupLineBreaking" class="select wide-select">
+          <option value="lines">按行拆页（Word 样式）</option>
+          <option value="blocks">整段不拆页</option>
+        </select>
+        <label for="setupReadingMode">页面显示</label>
+        <select id="setupReadingMode" class="select wide-select">
+          <option value="pages">分页纸张</option>
+          <option value="reading">连续阅读（收起页边距）</option>
+        </select>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <span class="spacer"></span>
+      <button class="tbtn" type="button" id="btnCancelPageSetup">取消</button>
       <button class="tbtn primary" type="submit">确定</button>
     </div>
   </form>
