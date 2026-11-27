@@ -63,7 +63,7 @@
 
 > macOS 13 / 14 还可以按住 <kbd>Control</kbd> 点图标选「打开」；macOS 15 之后这条捷径被系统取消了，只能走「系统设置 → 隐私与安全性」。
 > 需要 macOS 13 Ventura 或更新版本（系统 WKWebView 版本为 Safari 16 以上）。
-> v1.2.0 的 macOS 包已通过 CI 构建；当前 Release 先提供 Windows 安装包，Mac dmg 随后补到同一个 Release。
+> 当前 Release 先提供 Windows 安装包；macOS 版还在测试，完成后会补到同一个 Release。
 > 在 Mac 上自行构建见下面「从源码运行」。
 
 ## 功能一览

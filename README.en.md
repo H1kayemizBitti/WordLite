@@ -65,7 +65,7 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 
 > On macOS 13 / 14 you can also hold <kbd>Control</kbd>, click the icon and choose "Open"; macOS 15 removed that shortcut, so use System Settings.
 > Requires macOS 13 Ventura or later (Safari 16 WebKit or newer).
-> The v1.2.0 macOS build has passed CI; this Release currently ships Windows first, and the Mac dmg will be added to the same Release.
+> This Release currently ships the Windows build first; the macOS build is still being tested and will be added to the same Release.
 > To build it yourself on a Mac, see "Run from source" below.
 
 ## Features
