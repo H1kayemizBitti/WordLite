@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>未命名文档 - 简写</title>
+<script src="theme-boot.js"></script>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="themes.css">
 <style id="printPageStyle"></style>
 </head>
 <body>
@@ -33,9 +35,9 @@
         <div class="group-title">剪贴板</div>
         <div class="group-body">
           <div class="row">
-            <button class="tbtn ic" data-cmd="cut" title="剪切 (Ctrl+X)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="12" r="2"/><circle cx="11.5" cy="12" r="2"/><path d="M5.9 10.6L12 2M10.1 10.6L4 2"/></svg>剪切</button>
-            <button class="tbtn ic" data-cmd="copy" title="复制 (Ctrl+C)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="9" rx="1.5"/><path d="M10.5 5.5V3A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v7A1.5 1.5 0 0 0 4 11.5h1.5"/></svg>复制</button>
-            <button class="tbtn ic" data-cmd="paste" title="粘贴 (Ctrl+V)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 1.8h5v2.4h-5z"/><path d="M5.5 3H4a1 1 0 0 0-1 1v9.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-1.5"/></svg>粘贴</button>
+            <button class="tbtn ic" data-cmd="cut" title="剪切 (Ctrl+X)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="12" r="2"/><circle cx="11.5" cy="12" r="2"/><path class="cut-blade cut-blade-a" d="M5.9 10.6L12 2"/><path class="cut-blade cut-blade-b" d="M10.1 10.6L4 2"/></svg>剪切</button>
+            <button class="tbtn ic" data-cmd="copy" title="复制 (Ctrl+C)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect class="copy-front" x="5.5" y="5.5" width="8" height="9" rx="1.5"/><path class="copy-back" d="M10.5 5.5V3A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v7A1.5 1.5 0 0 0 4 11.5h1.5"/></svg>复制</button>
+            <button class="tbtn ic" data-cmd="paste" title="粘贴 (Ctrl+V)"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="paste-tab" d="M5.5 1.8h5v2.4h-5z"/><path class="paste-body" d="M5.5 3H4a1 1 0 0 0-1 1v9.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-1.5"/><path class="paste-sheet" d="M6.1 6.2h3.8v3.6H6.1z"/></svg>粘贴</button>
             <button class="tbtn ic" data-cmd="selectAll" title="全选 (Ctrl+A)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke-dasharray="2 1.7"/><path d="M5.5 8h5"/></svg>全选</button>
           </div>
           <div class="row">
@@ -178,7 +180,7 @@
         <div class="group-title">图片</div>
         <div class="group-body">
           <div class="row">
-            <button class="tbtn ic" data-cmd="editImage" data-image-control title="打开图片编辑面板：大小、对齐、环绕、裁剪、更换和删除"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5V12h10.5M1.5 4H12v10.5"/></svg>图片设置</button>
+            <button class="tbtn ic" data-cmd="editImage" data-image-control disabled title="打开图片编辑面板：大小、对齐、环绕、裁剪、更换和删除"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5V12h10.5M1.5 4H12v10.5"/></svg>图片设置</button>
           </div>
         </div>
       </div>
@@ -623,6 +625,40 @@
   <form id="settingsForm">
     <div class="dialog-body">
       <p class="dialog-note">这些默认值用于新建文档和未单独设置格式的文字；已保存文档中的显式格式不会被改写。</p>
+      <h3 class="settings-section-title">外观主题</h3>
+      <div class="theme-picker" id="themePicker" role="group" aria-label="外观主题">
+        <button class="theme-card" type="button" data-theme="classic" aria-pressed="false">
+          <span class="theme-preview theme-preview-classic" aria-hidden="true"><span class="theme-preview-bar"></span><span class="theme-preview-line"></span><span class="theme-preview-line short"></span></span>
+          <span class="theme-card-name">经典蓝</span>
+        </button>
+        <button class="theme-card" type="button" data-theme="paper-blue" aria-pressed="false">
+          <span class="theme-preview theme-preview-blue" aria-hidden="true"><span class="theme-preview-bar"></span><span class="theme-preview-line"></span><span class="theme-preview-line short"></span></span>
+          <span class="theme-card-name">纸墨</span>
+        </button>
+        <button class="theme-card" type="button" data-theme="paper-olive" aria-pressed="false">
+          <span class="theme-preview theme-preview-olive" aria-hidden="true"><span class="theme-preview-bar"></span><span class="theme-preview-line"></span><span class="theme-preview-line short"></span></span>
+          <span class="theme-card-name">纸橄榄</span>
+        </button>
+      </div>
+      <p class="dialog-note theme-note">主题只改屏幕显示；纸张颜色仍可在页面设置里改，打印和 PDF 不受主题影响。</p>
+      <label class="settings-check">
+        <input id="settingsMotion" type="checkbox" checked>
+        <span>界面动效</span>
+        <small>工具栏图标悬停动画与放大</small>
+      </label>
+      <h3 class="settings-section-title">右键常用</h3>
+      <div class="context-pref-row">
+        <div class="context-pin-list" id="contextPinList"></div>
+        <button class="tbtn" id="btnAddContextPin" type="button" title="添加一个右键常用功能">＋ 添加</button>
+      </div>
+      <div class="context-pin-menu" id="contextPinMenu" hidden></div>
+      <label class="settings-check">
+        <input id="settingsAutoContext" type="checkbox" checked>
+        <span>自动加入最近使用</span>
+        <small>最多显示 3 个</small>
+      </label>
+      <p class="dialog-note theme-note">右键菜单默认只有复制、粘贴等基础项；这里添加的功能会出现在「常用」区。</p>
+      <h3 class="settings-section-title">默认格式</h3>
       <div class="form-grid">
         <label for="settingsFont">默认字体</label>
         <select id="settingsFont" class="select wide-select"></select>

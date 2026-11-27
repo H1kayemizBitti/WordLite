@@ -1,6 +1,6 @@
 [package]
 name = "wordlite"
-version = "1.2.0"
+version = "1.3.0"
 description = "简写 WordLite - 离线、轻量的桌面写字板"
 authors = ["H1kayemizBitti"]
 edition = "2021"

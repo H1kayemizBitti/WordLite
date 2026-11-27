@@ -2173,7 +2173,7 @@ pub fn run() {
                                 results.ribbonSingleRow = groupTops.size === 1 &&
                                     document.querySelector('#ribbon').getBoundingClientRect().height < 220;
                                 document.querySelector('#btnRibbonExpand').click();
-                                await new Promise((resolve) => setTimeout(resolve, 300));
+                                await new Promise((resolve) => setTimeout(resolve, 800));
                                 const detailSheet = document.querySelector('#toolDetail');
                                 const ribbonRect = document.querySelector('#ribbon').getBoundingClientRect();
                                 const workspaceEl = document.querySelector('#workspace');

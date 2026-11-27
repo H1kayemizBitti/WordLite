@@ -502,6 +502,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab))
     document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'))
     document.querySelector(`#panel-${tab.dataset.tab}`).classList.add('active')
+    syncToolbar()
     closePopovers()
   })
 })
@@ -942,6 +943,7 @@ function runCommandButton (btn) {
   if (!btn) return
   const cmd = btn.dataset.cmd
   if (!cmd) return
+  noteCommandUse(cmd)
 
   if (cmd === 'formatPainter') {
     if (formatPainter) {
@@ -990,6 +992,7 @@ function runCommandButton (btn) {
   } else if (cmd === 'insertImage') {
     insertImage()
   } else if (cmd === 'editImage') {
+    if (!editor.isActive('image')) return
     openImageEditor(imagePosFromSelection())
   }
   syncToolbar()
@@ -2475,30 +2478,180 @@ function isContextMenuOpen () {
   return !contextMenu.hidden
 }
 
+// 右键「常用」：只放 3 个，按本机使用频率 + 最近使用时间挑；不搬走工具栏。
+const COMMAND_USAGE_KEY = 'wordlite.commandUsage.v1'
+const MENU_ICONS = {
+  cut: '<svg viewBox="0 0 16 16"><circle cx="4.5" cy="12" r="1.8"/><circle cx="11.5" cy="12" r="1.8"/><path d="M5.9 10.6L12 2M10.1 10.6L4 2"/></svg>',
+  copy: '<svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="9" rx="1.5"/><path d="M10.5 5.5V3A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v7A1.5 1.5 0 0 0 4 11.5h1.5"/></svg>',
+  paste: '<svg viewBox="0 0 16 16"><path d="M5.5 1.8h5v2.4h-5z"/><path d="M5.5 3H4a1 1 0 0 0-1 1v9.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-1.5"/></svg>',
+  selectAll: '<svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke-dasharray="2 1.7"/><path d="M5.5 8h5"/></svg>',
+  insertImage: '<svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="5.5" cy="6" r="1"/><path d="M2.5 11l3.5-3 2.5 2 2-1.5 3 2.5"/></svg>',
+  bold: '<span class="context-menu-letter">B</span>',
+  italic: '<span class="context-menu-letter italic">I</span>',
+  underline: '<span class="context-menu-letter underline">U</span>',
+  highlight: '<svg viewBox="0 0 16 16"><path d="M3 12l7-7 3 3-7 7H3z"/><path d="M9.5 2.5l4 4"/><path d="M2 15h12"/></svg>',
+  alignLeft: '<svg viewBox="0 0 16 16"><path d="M2 3h12M2 6.5h8M2 10h12M2 13.5h8"/></svg>',
+  alignCenter: '<svg viewBox="0 0 16 16"><path d="M2 3h12M4 6.5h8M2 10h12M4 13.5h8"/></svg>',
+  alignRight: '<svg viewBox="0 0 16 16"><path d="M2 3h12M6 6.5h8M2 10h12M6 13.5h8"/></svg>',
+  paragraph: '<svg viewBox="0 0 16 16"><path d="M2 3h12M2 6.5h12M2 10h12M4 13.5h8"/><path d="M12 12l3 3"/></svg>',
+  pageSetup: '<svg viewBox="0 0 16 16"><rect x="3" y="1.5" width="10" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h3"/></svg>',
+  insertTable: '<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 6.2h13M1.5 9.8h13M5.8 2.5v11M10.2 2.5v11"/></svg>',
+  clearFormat: '<span class="context-menu-letter">T</span><span class="context-menu-slash"></span>'
+}
+
+function normalizeUsage (raw) {
+  const out = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [id, value] of Object.entries(raw)) {
+    if (!value || typeof value !== 'object') continue
+    const count = Math.max(0, Math.min(999, Number(value.count) || 0))
+    const last = Number(value.last) || 0
+    if (count) out[id] = { count, last }
+  }
+  return out
+}
+let commandUsage = normalizeUsage(storageRead(COMMAND_USAGE_KEY, {}))
+
+function noteCommandUse (id) {
+  if (!id) return
+  const old = commandUsage[id] || { count: 0, last: 0 }
+  commandUsage = {
+    ...commandUsage,
+    [id]: { count: Math.min(999, old.count + 1), last: Date.now() }
+  }
+  storageWrite(COMMAND_USAGE_KEY, commandUsage)
+}
+
+const QUICK_ACTIONS = {
+  bold: {
+    label: '加粗', shortcut: `${modifierLabel}+B`, icon: MENU_ICONS.bold,
+    available: (kind, state) => kind === 'text' && !state.selection.empty,
+    run: () => editor.chain().focus().toggleBold().run()
+  },
+  italic: {
+    label: '斜体', shortcut: `${modifierLabel}+I`, icon: MENU_ICONS.italic,
+    available: (kind, state) => kind === 'text' && !state.selection.empty,
+    run: () => editor.chain().focus().toggleItalic().run()
+  },
+  underline: {
+    label: '下划线', shortcut: `${modifierLabel}+U`, icon: MENU_ICONS.underline,
+    available: (kind, state) => kind === 'text' && !state.selection.empty,
+    run: () => editor.chain().focus().toggleUnderline().run()
+  },
+  highlight: {
+    label: '高亮', icon: MENU_ICONS.highlight,
+    available: (kind, state) => kind === 'text' && !state.selection.empty,
+    run: () => editor.chain().focus().toggleHighlight({ color: '#ffff00' }).run()
+  },
+  alignLeft: {
+    label: '左对齐', icon: MENU_ICONS.alignLeft,
+    available: (kind) => kind === 'text' || kind === 'blank',
+    run: () => editor.chain().focus().setTextAlign('left').run()
+  },
+  alignCenter: {
+    label: '居中', icon: MENU_ICONS.alignCenter,
+    available: (kind) => kind === 'text' || kind === 'blank',
+    run: () => editor.chain().focus().setTextAlign('center').run()
+  },
+  alignRight: {
+    label: '右对齐', icon: MENU_ICONS.alignRight,
+    available: (kind) => kind === 'text' || kind === 'blank',
+    run: () => editor.chain().focus().setTextAlign('right').run()
+  },
+  paragraph: {
+    label: '段落设置…', icon: MENU_ICONS.paragraph,
+    available: (kind) => kind === 'text' || kind === 'blank',
+    run: () => openParagraphDialog()
+  },
+  pageSetup: {
+    label: '页面设置…', icon: MENU_ICONS.pageSetup,
+    available: () => true,
+    run: () => openPageSetupDialog()
+  },
+  insertTable: {
+    label: '插入表格 3×3', icon: MENU_ICONS.insertTable,
+    available: () => true,
+    run: () => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+  },
+  clearFormat: {
+    label: '清除格式', icon: MENU_ICONS.clearFormat,
+    available: (kind, state) => kind === 'text' && !state.selection.empty,
+    run: () => runCommandButton(document.querySelector('#ribbon [data-cmd="clearFormat"]'))
+  }
+}
+
+const CONTEXT_PREFS_KEY = 'wordlite.contextMenu.v1'
+const CONTEXT_PIN_LIMIT = 3
+
+function normalizeContextPrefs (raw) {
+  const pins = Array.isArray(raw?.pins)
+    ? [...new Set(raw.pins.filter((id) => QUICK_ACTIONS[id]))].slice(0, CONTEXT_PIN_LIMIT)
+    : []
+  return { pins, autoRecent: raw?.autoRecent !== false }
+}
+
+let contextPrefs = normalizeContextPrefs(storageRead(CONTEXT_PREFS_KEY, {}))
+let settingsPinsDraft = null
+
+function saveContextPrefs () {
+  storageWrite(CONTEXT_PREFS_KEY, contextPrefs)
+}
+
+function quickMenuItems (kind, state) {
+  const allowed = Object.entries(QUICK_ACTIONS)
+    .filter(([, action]) => action.available(kind, state))
+  const allowedIds = new Set(allowed.map(([id]) => id))
+  // 手动固定项优先；自动区只补“最近使用过”的、未被固定项占用的功能。
+  const pinned = contextPrefs.pins.filter((id) => allowedIds.has(id))
+  const recent = contextPrefs.autoRecent
+    ? allowed
+      .filter(([id]) => commandUsage[id] && !pinned.includes(id))
+      .sort((a, b) => (commandUsage[b[0]].last || 0) - (commandUsage[a[0]].last || 0))
+      .map(([id]) => id)
+    : []
+  const ids = [...new Set([...pinned, ...recent])].slice(0, CONTEXT_PIN_LIMIT)
+  return ids.map((id) => {
+    const action = QUICK_ACTIONS[id]
+    return {
+      label: action.label,
+      shortcut: action.shortcut,
+      icon: action.icon,
+      quick: true,
+      run: () => {
+        noteCommandUse(id)
+        action.run()
+        syncToolbar()
+      }
+    }
+  })
+}
+
 // 菜单项按位置和状态现拼：复制都用 ProseMirror 自己的序列化，格式和 Ctrl+C 一致
 function contextMenuItemsFor (kind, state) {
   const canWrite = () => !editor.isReadOnly
   const cutItem = {
-    label: '剪切', shortcut: `${modifierLabel}+X`, enabled: canWrite(),
+    label: '剪切', shortcut: `${modifierLabel}+X`, icon: MENU_ICONS.cut, enabled: canWrite(),
     run: () => { restoreContextMenuSelection(); execEditorCommand('cut') }
   }
   const copyItem = {
-    label: '复制', shortcut: `${modifierLabel}+C`, enabled: true,
+    label: '复制', shortcut: `${modifierLabel}+C`, icon: MENU_ICONS.copy, enabled: true,
     run: () => { restoreContextMenuSelection(); execEditorCommand('copy') }
   }
   const pasteItem = {
     // 粘贴：菜单点击本身是用户手势，可以读剪贴板，拿到 text/html 后交给 ProseMirror
     // 的粘贴管线，格式和 Ctrl+V 一致；读不到再退回原生命令，仍不行就提示按快捷键
-    label: '粘贴', shortcut: `${modifierLabel}+V`, enabled: canWrite(), run: () => pasteFromClipboard()
+    label: '粘贴', shortcut: `${modifierLabel}+V`, icon: MENU_ICONS.paste, enabled: canWrite(), run: () => pasteFromClipboard()
   }
   const selectAllItem = {
     label: '全选',
+    icon: MENU_ICONS.selectAll,
     shortcut: `${modifierLabel}+A`,
     enabled: true,
     run: () => editor.chain().focus().selectAll().run()
   }
   const insertImageItem = {
     label: '插入图片…',
+    icon: MENU_ICONS.insertImage,
     enabled: canWrite(),
     // 对话框关掉后把焦点还给编辑器，插入位置仍是右键处
     run: () => {
@@ -2565,7 +2718,15 @@ function contextMenuItemsFor (kind, state) {
   const items = !state.selection.empty
     ? [cutItem, copyItem]
     : [copyItem]
-  return [...items, pasteItem, selectAllItem, { separator: true }, insertImageItem]
+  const quick = quickMenuItems(kind, state)
+  return [
+    ...items,
+    pasteItem,
+    selectAllItem,
+    ...(quick.length ? [{ separator: true }, ...quick] : []),
+    { separator: true },
+    insertImageItem
+  ]
 }
 
 // 剪切 / 复制走 Chromium 原生命令：ProseMirror 的剪贴板序列化会在 keydown 时
@@ -2588,13 +2749,19 @@ function buildContextMenu (items) {
     }
     const button = document.createElement('button')
     button.type = 'button'
-    button.className = 'context-menu-item'
+    button.className = 'context-menu-item' + (item.quick ? ' context-menu-quick' : '')
     button.setAttribute('role', 'menuitem')
     if (item.enabled === false) {
       button.disabled = true
       button.setAttribute('aria-disabled', 'true')
     }
+    const icon = document.createElement('span')
+    icon.className = 'context-menu-icon'
+    icon.setAttribute('aria-hidden', 'true')
+    if (item.icon) icon.innerHTML = item.icon
+    button.appendChild(icon)
     const label = document.createElement('span')
+    label.className = 'context-menu-label'
     label.textContent = item.label
     button.appendChild(label)
     if (item.shortcut) {
@@ -3399,6 +3566,7 @@ function applyPageSetup () {
   if (quickNumber) quickNumber.value = pageSetup.pageNumber
   // 纸张尺寸/边距变了，所有页缝位置都要重算
   paginator?.force(0)
+  syncThemePaper()
 }
 
 function setPageSetup (patch) {
@@ -4520,6 +4688,124 @@ document.querySelector('#btnClearRecent').addEventListener('click', () => {
 const settingsDialog = document.querySelector('#settingsDialog')
 const helpDialog = document.querySelector('#helpDialog')
 
+const THEME_KEY = 'wordlite.theme.v1'
+const THEME_VALUES = ['classic', 'paper-blue', 'paper-olive']
+const MOTION_KEY = 'wordlite.motion.v1'
+let currentTheme = normalizeTheme(storageRead(THEME_KEY, 'classic'))
+let motionEnabled = storageRead(MOTION_KEY, true) !== false
+let settingsThemeBackup = null
+
+function applyMotion (enabled, { persist = false } = {}) {
+  motionEnabled = enabled !== false
+  document.documentElement.dataset.motion = motionEnabled ? 'on' : 'off'
+  if (persist) storageWrite(MOTION_KEY, motionEnabled)
+}
+
+function normalizeTheme (value) {
+  return THEME_VALUES.includes(value) ? value : 'classic'
+}
+
+function syncThemeCards () {
+  document.querySelectorAll('#themePicker .theme-card').forEach((card) => {
+    const active = card.dataset.theme === currentTheme
+    card.setAttribute('aria-pressed', active ? 'true' : 'false')
+  })
+}
+
+function syncThemePaper () {
+  const theme = document.documentElement.dataset.theme
+  const tinted = (theme === 'paper-blue' || theme === 'paper-olive') &&
+    String(pageSetup.background).toLowerCase() === '#ffffff'
+  document.body.classList.toggle('theme-paper', tinted)
+}
+
+function applyTheme (theme, { persist = false } = {}) {
+  currentTheme = normalizeTheme(theme)
+  document.documentElement.dataset.theme = currentTheme
+  if (persist) storageWrite(THEME_KEY, currentTheme)
+  syncThemeCards()
+  syncThemePaper()
+}
+
+function previewTheme (theme) {
+  if (!settingsThemeBackup) settingsThemeBackup = currentTheme
+  applyTheme(theme)
+}
+
+function cancelThemePreview () {
+  if (!settingsThemeBackup) return
+  applyTheme(settingsThemeBackup)
+  settingsThemeBackup = null
+}
+
+const contextPinList = document.querySelector('#contextPinList')
+const contextPinMenu = document.querySelector('#contextPinMenu')
+const btnAddContextPin = document.querySelector('#btnAddContextPin')
+const settingsAutoContext = document.querySelector('#settingsAutoContext')
+
+function contextActionRow (id) {
+  const action = QUICK_ACTIONS[id]
+  const icon = document.createElement('span')
+  icon.className = 'context-menu-icon'
+  icon.setAttribute('aria-hidden', 'true')
+  icon.innerHTML = action.icon || ''
+  const label = document.createElement('span')
+  label.textContent = action.label
+  return { icon, label }
+}
+
+function renderContextPins () {
+  if (!settingsPinsDraft) settingsPinsDraft = [...contextPrefs.pins]
+  contextPinList.innerHTML = ''
+  for (const id of settingsPinsDraft) {
+    if (!QUICK_ACTIONS[id]) continue
+    const chip = document.createElement('span')
+    chip.className = 'context-pin-chip'
+    const { icon, label } = contextActionRow(id)
+    chip.append(icon, label)
+    const remove = document.createElement('button')
+    remove.type = 'button'
+    remove.textContent = '×'
+    remove.title = `从右键常用移除：${QUICK_ACTIONS[id].label}`
+    remove.addEventListener('click', () => {
+      settingsPinsDraft = settingsPinsDraft.filter((item) => item !== id)
+      contextPinMenu.hidden = true
+      renderContextPins()
+    })
+    chip.appendChild(remove)
+    contextPinList.appendChild(chip)
+  }
+  btnAddContextPin.disabled = settingsPinsDraft.length >= CONTEXT_PIN_LIMIT
+}
+
+function renderContextPinMenu () {
+  contextPinMenu.innerHTML = ''
+  const available = Object.keys(QUICK_ACTIONS).filter((id) => !settingsPinsDraft.includes(id))
+  for (const id of available) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    const { icon, label } = contextActionRow(id)
+    button.append(icon, label)
+    button.addEventListener('click', () => {
+      if (settingsPinsDraft.length >= CONTEXT_PIN_LIMIT) return
+      settingsPinsDraft.push(id)
+      contextPinMenu.hidden = true
+      renderContextPins()
+    })
+    contextPinMenu.appendChild(button)
+  }
+  contextPinMenu.hidden = !available.length
+}
+
+btnAddContextPin.addEventListener('click', () => {
+  if (settingsPinsDraft.length >= CONTEXT_PIN_LIMIT) return
+  if (contextPinMenu.hidden) {
+    renderContextPinMenu()
+  } else {
+    contextPinMenu.hidden = true
+  }
+})
+
 function populateSettingsForm (source = settings) {
   document.querySelector('#settingsFont').value = source.fontFamily
   document.querySelector('#settingsFontSize').value = source.fontSize
@@ -4528,15 +4814,34 @@ function populateSettingsForm (source = settings) {
   document.querySelector('#settingsPageOrientation').value = source.pageOrientation
   document.querySelector('#settingsPageMargin').value = source.pageMargin
   document.querySelector('#settingsAutosave').value = source.autosaveMinutes
+  document.querySelector('#settingsMotion').checked = motionEnabled
+  syncThemeCards()
 }
 
 function openSettings () {
+  settingsThemeBackup = currentTheme
+  settingsPinsDraft = [...contextPrefs.pins]
+  settingsAutoContext.checked = contextPrefs.autoRecent
+  contextPinMenu.hidden = true
+  renderContextPins()
   populateSettingsForm()
   if (!settingsDialog.open) settingsDialog.showModal()
 }
 
 document.querySelector('#btnOpenSettings').addEventListener('click', openSettings)
 document.querySelector('#btnCancelSettings').addEventListener('click', () => settingsDialog.close())
+
+document.querySelectorAll('#themePicker .theme-card').forEach((card) => {
+  card.addEventListener('click', () => previewTheme(card.dataset.theme))
+})
+
+settingsDialog.addEventListener('close', () => {
+  cancelThemePreview()
+  settingsPinsDraft = null
+  contextPinMenu.hidden = true
+})
+applyTheme(currentTheme)
+applyMotion(motionEnabled)
 
 document.querySelector('#settingsForm').addEventListener('submit', (event) => {
   event.preventDefault()
@@ -4550,6 +4855,15 @@ document.querySelector('#settingsForm').addEventListener('submit', (event) => {
     autosaveMinutes: document.querySelector('#settingsAutosave').value
   })
   storageWrite(SETTINGS_KEY, settings)
+  contextPrefs = normalizeContextPrefs({
+    pins: settingsPinsDraft || contextPrefs.pins,
+    autoRecent: settingsAutoContext.checked
+  })
+  saveContextPrefs()
+  settingsPinsDraft = null
+  applyTheme(currentTheme, { persist: true })
+  applyMotion(document.querySelector('#settingsMotion').checked, { persist: true })
+  settingsThemeBackup = null
   applyDefaultStyles()
   scheduleAutoSave()
   settingsDialog.close()
@@ -4581,7 +4895,7 @@ function openHelp () {
 
 document.querySelector('#btnOpenHelp').addEventListener('click', openHelp)
 document.querySelector('#btnCloseHelp').addEventListener('click', () => helpDialog.close())
-document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.2.0'}`
+document.querySelector('#helpVersion').textContent = `版本 ${window.wordlite.appInfo?.version || '1.3.0'}`
 
 /* ---------------- 查找替换 ---------------- */
 

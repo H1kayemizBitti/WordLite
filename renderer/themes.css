@@ -1,0 +1,267 @@
+/* 三套屏幕主题：经典蓝不设 data-theme 覆盖，纸墨/纸橄榄只改界面。 */
+@media screen {
+  html[data-theme="paper-blue"] {
+    --bg-workspace: #f2ede3;
+    --bg-ribbon: #fbf7ee;
+    --border: #e4dccd;
+    --border-strong: #d7cdbb;
+    --text: #211f1a;
+    --text-dim: #6f6a5e;
+    --accent: #2f4f73;
+    --accent-strong: #243b56;
+    --accent-ring: rgba(47, 79, 115, 0.2);
+    --active-bg: #e7edf2;
+    --hover-bg: #f2ecdf;
+    --shadow-pop: 0 18px 54px rgba(51, 44, 32, 0.14), 0 2px 8px rgba(51, 44, 32, 0.06);
+    --theme-active-border: #c4d3e2;
+    --theme-brand-a: #4e719a;
+    --theme-brand-b: #223a55;
+    --theme-status-dot: #5f83a6;
+    --theme-status-ring: rgba(95, 131, 166, 0.18);
+    --theme-marker: #9fb0c0;
+  }
+
+  html[data-theme="paper-olive"] {
+    --bg-workspace: #f2ede3;
+    --bg-ribbon: #fbf7ee;
+    --border: #e4dccd;
+    --border-strong: #d7cdbb;
+    --text: #211f1a;
+    --text-dim: #6f6a5e;
+    --accent: #5e6b45;
+    --accent-strong: #4a5636;
+    --accent-ring: rgba(94, 107, 69, 0.2);
+    --active-bg: #e9eddd;
+    --hover-bg: #f2ecdf;
+    --shadow-pop: 0 18px 54px rgba(51, 44, 32, 0.14), 0 2px 8px rgba(51, 44, 32, 0.06);
+    --theme-active-border: #cbd3b8;
+    --theme-brand-a: #728057;
+    --theme-brand-b: #414b31;
+    --theme-status-dot: #7a8a58;
+    --theme-status-ring: rgba(122, 138, 88, 0.18);
+    --theme-marker: #a6ad95;
+  }
+
+  html[data-theme="paper-blue"],
+  html[data-theme="paper-olive"] {
+    background: var(--bg-workspace);
+  }
+
+  html[data-theme="paper-blue"] body,
+  html[data-theme="paper-olive"] body {
+    color: var(--text);
+    background: var(--bg-workspace);
+  }
+
+  html[data-theme="paper-blue"] #ribbon,
+  html[data-theme="paper-olive"] #ribbon {
+    background: linear-gradient(180deg, #fcf8ef 0%, #faf5ea 100%);
+    border-bottom-color: #ded4c3;
+    box-shadow: 0 1px 2px rgba(51, 44, 32, 0.05);
+  }
+
+  html[data-theme="paper-blue"] .brand-mark,
+  html[data-theme="paper-olive"] .brand-mark {
+    background: linear-gradient(135deg, var(--theme-brand-a), var(--theme-brand-b));
+    box-shadow: 0 1px 3px rgba(34, 58, 85, 0.24);
+  }
+
+  html[data-theme="paper-blue"] .brand-name,
+  html[data-theme="paper-olive"] .brand-name { color: #2a2822; }
+
+  html[data-theme="paper-blue"] .tab,
+  html[data-theme="paper-olive"] .tab { color: #7a7467; }
+  html[data-theme="paper-blue"] .tab:hover,
+  html[data-theme="paper-olive"] .tab:hover { background: #f1ebdd; color: #2a2822; }
+  html[data-theme="paper-blue"] .tab.active,
+  html[data-theme="paper-olive"] .tab.active { background: transparent; color: var(--accent); }
+  html[data-theme="paper-blue"] .tab.active::after,
+  html[data-theme="paper-olive"] .tab.active::after { background: var(--accent); }
+
+  html[data-theme="paper-blue"] .panels,
+  html[data-theme="paper-olive"] .panels {
+    background: #fbf7ee;
+    border-top-color: #e8dfd0;
+  }
+  html[data-theme="paper-blue"] .panel,
+  html[data-theme="paper-olive"] .panel { background: transparent; }
+  html[data-theme="paper-blue"] .group + .group::before,
+  html[data-theme="paper-olive"] .group + .group::before {
+    background: linear-gradient(transparent, #e0d6c5 18%, #e0d6c5 82%, transparent);
+  }
+  html[data-theme="paper-blue"] .group-title,
+  html[data-theme="paper-olive"] .group-title { color: #9a917f; }
+  html[data-theme="paper-blue"] .mini-label,
+  html[data-theme="paper-blue"] .unit,
+  html[data-theme="paper-blue"] .layout-row > label,
+  html[data-theme="paper-olive"] .mini-label,
+  html[data-theme="paper-olive"] .unit,
+  html[data-theme="paper-olive"] .layout-row > label { color: #7e786b; }
+
+  html[data-theme="paper-blue"] .tbtn,
+  html[data-theme="paper-olive"] .tbtn { color: #35322b; }
+  html[data-theme="paper-blue"] .tbtn:hover,
+  html[data-theme="paper-olive"] .tbtn:hover { background: var(--hover-bg); }
+  html[data-theme="paper-blue"] .tbtn:active,
+  html[data-theme="paper-olive"] .tbtn:active { background: #e9e1d2; }
+  html[data-theme="paper-blue"] .tbtn.active,
+  html[data-theme="paper-olive"] .tbtn.active {
+    background: var(--active-bg);
+    border-color: var(--theme-active-border);
+    color: var(--accent);
+  }
+  html[data-theme="paper-blue"] .tbtn.ic svg,
+  html[data-theme="paper-olive"] .tbtn.ic svg { color: #5e5a50; }
+  html[data-theme="paper-blue"] .tbtn.ic:hover:not(:disabled) svg,
+  html[data-theme="paper-blue"] .tbtn.ic:focus-visible svg,
+  html[data-theme="paper-olive"] .tbtn.ic:hover:not(:disabled) svg,
+  html[data-theme="paper-olive"] .tbtn.ic:focus-visible svg { color: var(--accent); }
+  html[data-theme="paper-blue"] .tbtn:disabled,
+  html[data-theme="paper-olive"] .tbtn:disabled {
+    color: #b0b6bf;
+    opacity: 0.55;
+    background: transparent;
+    border-color: transparent;
+    cursor: default;
+  }
+  html[data-theme="paper-blue"] .tbtn.ic:disabled svg,
+  html[data-theme="paper-olive"] .tbtn.ic:disabled svg { color: #c4c9d0; transform: none; }
+
+  html[data-theme="paper-blue"] .tbtn.primary,
+  html[data-theme="paper-olive"] .tbtn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  html[data-theme="paper-blue"] .select,
+  html[data-theme="paper-blue"] .num-input,
+  html[data-theme="paper-blue"] .text-input,
+  html[data-theme="paper-blue"] .color-input,
+  html[data-theme="paper-olive"] .select,
+  html[data-theme="paper-olive"] .num-input,
+  html[data-theme="paper-olive"] .text-input,
+  html[data-theme="paper-olive"] .color-input {
+    background-color: #fffdf7;
+    border-color: #d9d0bf;
+    border-radius: 8px;
+    color: var(--text);
+  }
+  html[data-theme="paper-blue"] .select:hover,
+  html[data-theme="paper-blue"] .num-input:hover,
+  html[data-theme="paper-blue"] .text-input:hover,
+  html[data-theme="paper-blue"] .color-input:hover,
+  html[data-theme="paper-olive"] .select:hover,
+  html[data-theme="paper-olive"] .num-input:hover,
+  html[data-theme="paper-olive"] .text-input:hover,
+  html[data-theme="paper-olive"] .color-input:hover { border-color: #bdb19d; }
+  html[data-theme="paper-blue"] .select:focus,
+  html[data-theme="paper-blue"] .num-input:focus,
+  html[data-theme="paper-blue"] .text-input:focus,
+  html[data-theme="paper-olive"] .select:focus,
+  html[data-theme="paper-olive"] .num-input:focus,
+  html[data-theme="paper-olive"] .text-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  html[data-theme="paper-blue"] .ribbon-expand,
+  html[data-theme="paper-olive"] .ribbon-expand {
+    background: #fffcf4;
+    border-color: #d8cfbe;
+    color: #6e6a5e;
+    border-radius: 9px;
+    box-shadow: 0 1px 2px rgba(51, 44, 32, 0.06);
+  }
+  html[data-theme="paper-blue"] .ribbon-expand:hover,
+  html[data-theme="paper-olive"] .ribbon-expand:hover { background: #f2ecdf; color: var(--accent); }
+  html[data-theme="paper-blue"] .ribbon-expand.active,
+  html[data-theme="paper-olive"] .ribbon-expand.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--active-bg);
+  }
+
+  /* 主题的“纸色”只作用于屏幕，且只在页面背景仍是默认白时生效；
+     用户自定义纸色或打印/PDF 时完全不动。 */
+  html[data-theme="paper-blue"] body.theme-paper .paper:not(.paginated),
+  html[data-theme="paper-olive"] body.theme-paper .paper:not(.paginated) { background: #fffcf4; }
+  html[data-theme="paper-blue"] body.theme-paper .page-sheet,
+  html[data-theme="paper-olive"] body.theme-paper .page-sheet { background: #fffcf4 !important; }
+
+  html[data-theme="paper-blue"] #workspace,
+  html[data-theme="paper-olive"] #workspace {
+    background:
+      radial-gradient(ellipse at 50% -12%, rgba(255, 253, 246, 0.96) 0%, rgba(255, 253, 246, 0) 58%),
+      linear-gradient(180deg, #f4efe5 0%, #efe9dd 100%);
+  }
+
+  html[data-theme="paper-blue"] #statusbar,
+  html[data-theme="paper-olive"] #statusbar {
+    background: rgba(251, 247, 238, 0.9);
+    border-top-color: #e2d9c9;
+    color: #6f6a5e;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+  html[data-theme="paper-blue"] #wordCount,
+  html[data-theme="paper-olive"] #wordCount {
+    background: #ece7da;
+    color: #5c574b;
+  }
+  html[data-theme="paper-blue"] .status-badge,
+  html[data-theme="paper-olive"] .status-badge { color: #6f6a5e; }
+  html[data-theme="paper-blue"] .status-badge::before,
+  html[data-theme="paper-olive"] .status-badge::before {
+    background: var(--theme-status-dot);
+    box-shadow: 0 0 0 2px var(--theme-status-ring);
+  }
+  html[data-theme="paper-blue"] .zoom-box,
+  html[data-theme="paper-olive"] .zoom-box { background: #ece7da; border-radius: 999px; padding: 2px; }
+  html[data-theme="paper-blue"] .zoom-btn,
+  html[data-theme="paper-blue"] .zoom-value,
+  html[data-theme="paper-olive"] .zoom-btn,
+  html[data-theme="paper-olive"] .zoom-value { color: #5c574b; border-radius: 999px; }
+  html[data-theme="paper-blue"] .zoom-btn:hover,
+  html[data-theme="paper-blue"] .zoom-value:hover,
+  html[data-theme="paper-olive"] .zoom-btn:hover,
+  html[data-theme="paper-olive"] .zoom-value:hover { background: var(--accent-ring); }
+
+  html[data-theme="paper-blue"] .tool-detail,
+  html[data-theme="paper-olive"] .tool-detail { background: #fbf7ee; border-color: #d8cfbe; }
+  html[data-theme="paper-blue"] .tool-detail-head,
+  html[data-theme="paper-olive"] .tool-detail-head {
+    background: #f6f0e4;
+    border-bottom-color: #e2d9c9;
+  }
+  html[data-theme="paper-blue"] .tool-detail section + section,
+  html[data-theme="paper-olive"] .tool-detail section + section { border-top-color: #e7dfd0; }
+  html[data-theme="paper-blue"] .tool-detail h3,
+  html[data-theme="paper-olive"] .tool-detail h3 { color: var(--accent); }
+  html[data-theme="paper-blue"] .detail-row > label,
+  html[data-theme="paper-olive"] .detail-row > label { color: #6f6a5e; }
+
+  html[data-theme="paper-blue"] .context-menu,
+  html[data-theme="paper-olive"] .context-menu,
+  html[data-theme="paper-blue"] .find-bar,
+  html[data-theme="paper-olive"] .find-bar,
+  html[data-theme="paper-blue"] dialog,
+  html[data-theme="paper-olive"] dialog {
+    background: #fbf7ee;
+    border-color: #d8cfbe;
+  }
+  html[data-theme="paper-blue"] .context-menu-item:hover,
+  html[data-theme="paper-blue"] .context-menu-item:focus,
+  html[data-theme="paper-olive"] .context-menu-item:hover,
+  html[data-theme="paper-olive"] .context-menu-item:focus { background: var(--active-bg); }
+
+  html[data-theme="paper-blue"] ::-webkit-scrollbar-thumb,
+  html[data-theme="paper-olive"] ::-webkit-scrollbar-thumb { background: rgba(80, 72, 58, 0.22); }
+
+  html[data-theme="paper-blue"] .ProseMirror .page-gap-widget.page-break-marker,
+  html[data-theme="paper-olive"] .ProseMirror .page-gap-widget.page-break-marker {
+    border-top-color: var(--theme-marker);
+    background: linear-gradient(to bottom, var(--accent-ring), transparent);
+  }
+  html[data-theme="paper-blue"] .page-break-marker-label,
+  html[data-theme="paper-olive"] .page-break-marker-label { color: var(--accent); opacity: 0.65; }
+}
