@@ -2233,3 +2233,82 @@ body.pdf-capture .ProseMirror [data-resize-container].in-selection [data-resize-
 .context-pin-menu .context-menu-icon { width: 14px; height: 14px; color: var(--text-dim); }
 .context-pin-menu .context-menu-icon svg { width: 14px; height: 14px; }
 .context-pin-menu .context-menu-letter { width: 14px; height: 14px; font-size: 12px; }
+
+/* 其余工具栏图标：一次轻弹 + 轻微转动，最后停在 1.15 倍。 */
+@keyframes toolbar-icon-nudge {
+  0% { transform: scale(1) rotate(0deg); }
+  34% { transform: scale(1.07) rotate(-1.4deg); }
+  68% { transform: scale(1.13) rotate(0.9deg); }
+  100% { transform: scale(1.15) rotate(0deg); }
+}
+@keyframes undo-nudge {
+  0% { transform: scale(1) rotate(0deg); }
+  34% { transform: scale(1.06) rotate(-13deg); }
+  68% { transform: scale(1.13) rotate(4deg); }
+  100% { transform: scale(1.15) rotate(0deg); }
+}
+@keyframes redo-nudge {
+  0% { transform: scale(1) rotate(0deg); }
+  34% { transform: scale(1.06) rotate(13deg); }
+  68% { transform: scale(1.13) rotate(-4deg); }
+  100% { transform: scale(1.15) rotate(0deg); }
+}
+@keyframes format-painter-nudge {
+  0% { transform: scale(1) rotate(0deg); }
+  34% { transform: scale(1.06) rotate(-9deg); }
+  70% { transform: scale(1.13) rotate(2deg); }
+  100% { transform: scale(1.15) rotate(0deg); }
+}
+@keyframes find-nudge {
+  0% { transform: scale(1) translate(0, 0); }
+  34% { transform: scale(1.06) translate(-1.5px, -1px); }
+  70% { transform: scale(1.13) translate(0.8px, 0.5px); }
+  100% { transform: scale(1.15) translate(0, 0); }
+}
+@keyframes text-icon-pop {
+  0% { transform: scale(1); }
+  44% { transform: scale(1.18) rotate(-2deg); }
+  72% { transform: scale(1.08) rotate(1deg); }
+  100% { transform: scale(1.12); }
+}
+
+.tbtn.ic:hover:not(:disabled) svg,
+.quick-btn:hover:not(:disabled) svg {
+  animation: toolbar-icon-nudge 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#btnUndo:hover:not(:disabled) svg { animation-name: undo-nudge; }
+#btnRedo:hover:not(:disabled) svg { animation-name: redo-nudge; }
+#btnFormatPainter:hover:not(:disabled) svg { animation-name: format-painter-nudge; }
+#btnFind:hover:not(:disabled) svg { animation-name: find-nudge; }
+
+.quick-btn svg { transition: transform 0.18s ease; }
+
+.tbtn.font-style:hover:not(:disabled) b,
+.tbtn.font-style:hover:not(:disabled) i,
+.tbtn.font-style:hover:not(:disabled) u,
+.tbtn.font-style:hover:not(:disabled) s {
+  display: inline-block;
+  animation: text-icon-pop 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html[data-motion="off"] .tbtn.ic:hover:not(:disabled) svg,
+html[data-motion="off"] .quick-btn:hover:not(:disabled) svg,
+html[data-motion="off"] .tbtn.font-style:hover:not(:disabled) b,
+html[data-motion="off"] .tbtn.font-style:hover:not(:disabled) i,
+html[data-motion="off"] .tbtn.font-style:hover:not(:disabled) u,
+html[data-motion="off"] .tbtn.font-style:hover:not(:disabled) s {
+  animation: none !important;
+  transform: none;
+}
+
+@keyframes swatch-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.2); }
+  100% { transform: scale(1.1); }
+}
+.tbtn.swatch:hover:not(:disabled) .swatch-bar {
+  display: inline-block;
+  animation: swatch-pop 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+html[data-motion="off"] .tbtn.swatch:hover:not(:disabled) .swatch-bar { animation: none !important; transform: none; }
