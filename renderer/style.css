@@ -456,15 +456,17 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
   stroke-linejoin: round;
   pointer-events: none;
 }
-.tbtn.ic svg {
+.tbtn.ic svg,
+.tbtn.icon svg {
   color: #4b5563;
   transform-box: fill-box;
   transform-origin: center;
   transition: color 0.22s ease, transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.tbtn.ic:hover:not(:disabled) svg, .tbtn.ic:focus-visible svg { color: var(--accent); transform: scale(1.15); }
+.tbtn.ic:hover:not(:disabled) svg, .tbtn.ic:focus-visible svg,
+.tbtn.icon:hover:not(:disabled) svg, .tbtn.icon:focus-visible svg { color: var(--accent); transform: scale(1.15); }
 .tbtn.ic.active svg { color: var(--accent); }
-.tbtn.ic:disabled svg { color: #c4c9d0; }
+.tbtn.ic:disabled svg, .tbtn.icon:disabled svg { color: #c4c9d0; }
 
 /* 工具栏图标 hover：默认图标保持原样；鼠标移入时做一次“起势→动作→回落”的动画，
    最后回到默认形状，只把整体放大一点点。 */
@@ -2273,6 +2275,7 @@ body.pdf-capture .ProseMirror [data-resize-container].in-selection [data-resize-
 }
 
 .tbtn.ic:hover:not(:disabled) svg,
+.tbtn.icon:hover:not(:disabled) svg,
 .quick-btn:hover:not(:disabled) svg {
   animation: toolbar-icon-nudge 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -2293,6 +2296,7 @@ body.pdf-capture .ProseMirror [data-resize-container].in-selection [data-resize-
 }
 
 html[data-motion="off"] .tbtn.ic:hover:not(:disabled) svg,
+html[data-motion="off"] .tbtn.icon:hover:not(:disabled) svg,
 html[data-motion="off"] .quick-btn:hover:not(:disabled) svg,
 html[data-motion="off"] .tbtn.font-style:hover:not(:disabled) b,
 html[data-motion="off"] .tbtn.font-style:hover:not(:disabled) i,

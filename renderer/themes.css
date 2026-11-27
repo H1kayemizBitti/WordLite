@@ -125,7 +125,9 @@
     cursor: default;
   }
   html[data-theme="paper-blue"] .tbtn.ic:disabled svg,
-  html[data-theme="paper-olive"] .tbtn.ic:disabled svg { color: #c4c9d0; transform: none; }
+  html[data-theme="paper-blue"] .tbtn.icon:disabled svg,
+  html[data-theme="paper-olive"] .tbtn.ic:disabled svg,
+  html[data-theme="paper-olive"] .tbtn.icon:disabled svg { color: #c4c9d0; transform: none; }
 
   html[data-theme="paper-blue"] .tbtn.primary,
   html[data-theme="paper-olive"] .tbtn.primary {
