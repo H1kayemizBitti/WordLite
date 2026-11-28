@@ -18,8 +18,8 @@ const REQUIRED_BOOL = [
   'paragraphDialog', 'paragraphExactLine', 'paragraphSpacing',
   // 默认字体/字号标签、打印关闭保护命令
   'defaultFormatLabels', 'printingGuard',
-  // 工具栏单行、右下角详细工具侧板（宽窗停靠不压纸，窄窗浮动卡片）
-  'ribbonSingleRow', 'ribbonDetail', 'ribbonDetailLayout',
+  // 工具栏按组换行、下拉框文字完整、右下角详细工具侧板（宽窗停靠不压纸，窄窗浮动卡片）
+  'ribbonNoClip', 'ribbonSelectText', 'ribbonLayout', 'ribbonDetail', 'ribbonDetailLayout',
   // 标签栏撤销/重做按钮
   'historyButtons',
   // Mac 显式纸张：页眉页脚页码是每页 DOM，PDF 页数和屏幕一致

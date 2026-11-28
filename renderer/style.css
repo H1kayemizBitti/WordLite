@@ -200,10 +200,12 @@ body.file-drag-over::after {
 .panel {
   display: none;
   align-items: stretch;
-  /* 工具栏永远不换行：窗口窄了先压缩分组，压到最小后由右下角的展开按钮兜底 */
-  flex-wrap: nowrap;
+  /* 分组不压缩、不裁切：一行放不下时整组换到下一行，工具栏高度自动增加。
+     默认 1160 宽能放下一行；更窄时变成两行，按钮和下拉框始终完整。 */
+  flex-wrap: wrap;
+  align-content: flex-start;
   gap: 4px 0;
-  padding: 8px 44px 4px 8px;
+  padding: 6px 40px 4px 4px;
   min-height: 124px;
   overflow: hidden;
   position: relative;
@@ -227,21 +229,15 @@ body.file-drag-over::after {
 .group {
   display: flex;
   flex-direction: column;
-  padding: 0 12px;
+  padding: 0 5px;
   position: relative;
-  flex: 0 1 auto;
+  /* 分组按内容自然宽度排，窗口窄了由 .panel 整组换行，不在组内裁切控件 */
+  flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
 }
 
-/* 各分组的最小宽度：压到这里就不再缩，剩下的交给“详细工具”面板 */
-.group-clipboard { min-width: 110px; }
-.group-font { min-width: 340px; }
-.group-paragraph { min-width: 170px; }
-.group-page { min-width: 100px; }
-.group-edit { min-width: 70px; }
-
-/* 分组之间的竖线：上下留白，看起来更轻 */
+/* 分组之间的竖线：上下留白，看起来更轻；换行后的行首分组不画线 */
 .group + .group::before {
   content: '';
   position: absolute;
@@ -251,6 +247,8 @@ body.file-drag-over::after {
   width: 1px;
   background: var(--border);
 }
+
+.group.row-start::before { display: none; }
 
 /* 分组名放在底部（与常见办公软件一致） */
 .group-title {
@@ -429,6 +427,9 @@ body.tool-detail-open.tool-detail-docked #workspace { margin-right: 340px; }
 .tbtn:hover { background: var(--hover-bg); }
 .tbtn:active { background: #e3e7ed; }
 .tbtn:disabled { color: #b0b6bf; cursor: default; background: transparent; border-color: transparent; }
+/* 功能区的按钮略收紧，给默认 1160 宽留出五组一行的余量 */
+#ribbon .tbtn { padding-left: 6px; padding-right: 6px; }
+#ribbon .tbtn.ic { padding-left: 5px; padding-right: 6px; gap: 5px; }
 
 .tbtn.active {
   background: var(--active-bg);
@@ -580,9 +581,18 @@ html[data-motion="off"] .tbtn.ic:focus-visible svg { transform: none; }
 }
 
 .select.narrow { max-width: 74px; }
-#fontFamily { min-width: 160px; max-width: 160px; }
-#fontSize { min-width: 150px; max-width: 150px; }
-#lineHeight { min-width: 140px; max-width: 140px; }
+/* 功能区下拉框：宽度按“文字完整显示”定，不再靠 flex 压缩。
+   默认 1160 窗口五组能排成一行；更窄时整组换行。 */
+#ribbon .select { font-size: 12px; padding-right: 18px; }
+#ribbon .row > .select,
+#ribbon .row > .num-input,
+#ribbon .row > .color-input { flex: none; }
+#ribbon #fontFamily { min-width: 146px; max-width: 146px; }
+#ribbon #fontSize { min-width: 150px; max-width: 150px; }
+#ribbon #blockStyle { min-width: 72px; max-width: 72px; }
+#ribbon #lineHeight { min-width: 112px; max-width: 112px; }
+#ribbon #quickPageNumber { min-width: 96px; max-width: 96px; }
+#ribbon .group-paragraph .num-input { width: 52px; }
 .select:hover { border-color: #a8b0bd; }
 .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .tbtn:focus-visible {

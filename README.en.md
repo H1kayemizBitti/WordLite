@@ -80,7 +80,7 @@ WordLite does one thing: **format text on your own machine, save it as DOCX, or 
 | Tables | Insert, drag column widths, merge / split cells, cell shading, border width and color |
 | Images | Insert, drag to move, precise resize, left / center / right align, text wrapping (square / top-and-bottom), visual crop, side panel with live preview and one-step undo, full-size viewer, replace, delete |
 | Page | A4 screen pagination (line-level breaks, headings kept with the next paragraph, tables / images kept intact), continuous reading (double-click the page gap), paper size, orientation, custom margins, paper color, three page-number modes (off / screen only / screen + print), header and footer, line/block breaking, page setup, manual page breaks |
-| Interface | Single-row toolbar; always-visible undo / redo in the tab bar; bottom-right detailed tools panel (docked on wide windows, floating on narrow ones); actual default labels for font and size; page count and continuous-reading status |
+| Interface | Toolbar groups wrap as a whole (one row at the default width, two on narrow windows, no clipped controls); always-visible undo / redo in the tab bar; bottom-right detailed tools panel (docked on wide windows, floating on narrow ones); actual default labels for font and size; page count and continuous-reading status |
 | Output | Print (Ctrl+P opens the system print dialog directly, where you set page range, copies and preview), export to PDF; screen / print preview / PDF share the same pagination breaks; macOS PDF export writes header / footer / page numbers per page; closing the document window is blocked while the print panel is open |
 
 <details>

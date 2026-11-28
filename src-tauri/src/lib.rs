@@ -2164,14 +2164,57 @@ pub fn run() {
                                 results.defaultFormatLabels = false;
                                 results.labelError = String(labelError);
                             }}
-                            // 工具栏单行 + 右下角详细工具侧板
+                            // 工具栏按组换行：任何宽度下控件都不被裁切；默认 1160 一行，窄窗两行
                             try {{
                                 document.querySelector('#btnZoomReset').click();
-                                await new Promise((resolve) => setTimeout(resolve, 120));
-                                const homeGroups = Array.from(document.querySelectorAll('#panel-home > .group')).map((el) => el.getBoundingClientRect());
+                                await new Promise((resolve) => setTimeout(resolve, 160));
+                                const homePanel = document.querySelector('#panel-home');
+                                const homeGroupEls = Array.from(homePanel.querySelectorAll(':scope > .group'));
+                                const homeGroups = homeGroupEls.map((el) => el.getBoundingClientRect());
                                 const groupTops = new Set(homeGroups.map((rect) => Math.round(rect.top)));
-                                results.ribbonSingleRow = groupTops.size === 1 &&
-                                    document.querySelector('#ribbon').getBoundingClientRect().height < 220;
+                                const clipped = Array.from(homePanel.querySelectorAll('button, select, input')).filter((el) => {{
+                                    const box = el.getBoundingClientRect();
+                                    if (!box.width) return false;
+                                    const group = el.closest('.group').getBoundingClientRect();
+                                    return box.left < group.left - 1 || box.right > group.right + 1 ||
+                                        box.left < -1 || box.right > window.innerWidth + 1;
+                                }});
+                                // 下拉框文字不能被截断：用同一字体量当前选项的文字宽度
+                                const selectTextFits = Array.from(homePanel.querySelectorAll('select')).every((el) => {{
+                                    const style = getComputedStyle(el);
+                                    const text = el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : '';
+                                    const canvas = document.createElement('canvas');
+                                    const ctx = canvas.getContext('2d');
+                                    ctx.font = style.fontWeight + ' ' + style.fontSize + ' ' + style.fontFamily;
+                                    const available = el.clientWidth - parseFloat(style.paddingLeft) -
+                                        parseFloat(style.paddingRight) - 1;
+                                    return ctx.measureText(text).width <= available;
+                                }});
+                                results.ribbonNoClip = clipped.length === 0 &&
+                                    homePanel.scrollWidth <= homePanel.clientWidth + 1;
+                                results.ribbonSelectText = selectTextFits;
+                                results.ribbonRows = groupTops.size;
+                                results.ribbonLayoutInfo = {{
+                                    innerWidth: window.innerWidth,
+                                    rows: groupTops.size,
+                                    ribbonHeight: document.querySelector('#ribbon').getBoundingClientRect().height,
+                                    groups: homeGroupEls.map((el) => {{
+                                        const rect = el.getBoundingClientRect();
+                                        return {{
+                                            title: el.querySelector('.group-title').textContent,
+                                            width: Math.round(rect.width),
+                                            top: Math.round(rect.top)
+                                        }};
+                                    }}),
+                                    clipped: clipped.map((el) => el.id || el.textContent.trim().slice(0, 8))
+                                }};
+                                // 1160 是默认窗口宽，应是一行；1024 的 CI 屏幕应是两行。
+                                const expectedRows = window.innerWidth >= 1155 ? 1 :
+                                    (window.innerWidth <= 1050 ? 2 : null);
+                                results.ribbonLayout = results.ribbonNoClip && results.ribbonSelectText &&
+                                    (expectedRows === null || groupTops.size === expectedRows) &&
+                                    document.querySelector('#ribbon').getBoundingClientRect().height < 340;
+                                results.ribbonSingleRow = groupTops.size === 1;
                                 document.querySelector('#btnRibbonExpand').click();
                                 await new Promise((resolve) => setTimeout(resolve, 800));
                                 const detailSheet = document.querySelector('#toolDetail');
@@ -2219,7 +2262,11 @@ pub fn run() {
                                 }}
                                 document.querySelector('#btnToolDetailClose').click();
                             }} catch (ribbonError) {{
+                                results.ribbonNoClip = false;
+                                results.ribbonSelectText = false;
+                                results.ribbonLayout = false;
                                 results.ribbonSingleRow = false;
+                                results.ribbonRows = 0;
                                 results.ribbonDetail = false;
                                 results.ribbonDetailDocked = false;
                                 results.ribbonDetailLayout = false;

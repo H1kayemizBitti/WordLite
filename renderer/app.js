@@ -497,6 +497,28 @@ editor.view.dom.addEventListener('dragstart', (event) => {
 
 /* ---------------- 选项卡 ---------------- */
 
+// 功能区按组换行后，每行第一组左侧的竖线要去掉；offsetTop 只能等布局完成再量
+let ribbonRowsFrame = 0
+
+function updateRibbonRows () {
+  const panel = document.querySelector('#ribbon .panel.active')
+  if (!panel) return
+  let lastTop = null
+  panel.querySelectorAll(':scope > .group').forEach((group) => {
+    const top = Math.round(group.offsetTop)
+    group.classList.toggle('row-start', lastTop === null || top !== lastTop)
+    lastTop = top
+  })
+}
+
+function scheduleRibbonRows () {
+  if (ribbonRowsFrame) return
+  ribbonRowsFrame = requestAnimationFrame(() => {
+    ribbonRowsFrame = 0
+    updateRibbonRows()
+  })
+}
+
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab))
@@ -504,8 +526,13 @@ document.querySelectorAll('.tab').forEach((tab) => {
     document.querySelector(`#panel-${tab.dataset.tab}`).classList.add('active')
     syncToolbar()
     closePopovers()
+    scheduleRibbonRows()
   })
 })
+
+window.addEventListener('resize', scheduleRibbonRows)
+if (document.fonts?.ready) document.fonts.ready.then(scheduleRibbonRows)
+scheduleRibbonRows()
 
 /* ---------------- 下拉框填充 ---------------- */
 
