@@ -970,7 +970,6 @@ function runCommandButton (btn) {
   if (!btn) return
   const cmd = btn.dataset.cmd
   if (!cmd) return
-  noteCommandUse(cmd)
 
   if (cmd === 'formatPainter') {
     if (formatPainter) {
@@ -2505,8 +2504,8 @@ function isContextMenuOpen () {
   return !contextMenu.hidden
 }
 
-// 右键「常用」：只放 3 个，按本机使用频率 + 最近使用时间挑；不搬走工具栏。
-const COMMAND_USAGE_KEY = 'wordlite.commandUsage.v1'
+// 右键「常用」：固定 3 个位置，按当前场景给默认项；用户手动固定的优先。
+// 不再按“最近使用”自动换位，避免菜单每次右键都变。
 const MENU_ICONS = {
   cut: '<svg viewBox="0 0 16 16"><circle cx="4.5" cy="12" r="1.8"/><circle cx="11.5" cy="12" r="1.8"/><path d="M5.9 10.6L12 2M10.1 10.6L4 2"/></svg>',
   copy: '<svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="9" rx="1.5"/><path d="M10.5 5.5V3A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v7A1.5 1.5 0 0 0 4 11.5h1.5"/></svg>',
@@ -2523,30 +2522,8 @@ const MENU_ICONS = {
   paragraph: '<svg viewBox="0 0 16 16"><path d="M2 3h12M2 6.5h12M2 10h12M4 13.5h8"/><path d="M12 12l3 3"/></svg>',
   pageSetup: '<svg viewBox="0 0 16 16"><rect x="3" y="1.5" width="10" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h3"/></svg>',
   insertTable: '<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 6.2h13M1.5 9.8h13M5.8 2.5v11M10.2 2.5v11"/></svg>',
-  clearFormat: '<span class="context-menu-letter">T</span><span class="context-menu-slash"></span>'
-}
-
-function normalizeUsage (raw) {
-  const out = {}
-  if (!raw || typeof raw !== 'object') return out
-  for (const [id, value] of Object.entries(raw)) {
-    if (!value || typeof value !== 'object') continue
-    const count = Math.max(0, Math.min(999, Number(value.count) || 0))
-    const last = Number(value.last) || 0
-    if (count) out[id] = { count, last }
-  }
-  return out
-}
-let commandUsage = normalizeUsage(storageRead(COMMAND_USAGE_KEY, {}))
-
-function noteCommandUse (id) {
-  if (!id) return
-  const old = commandUsage[id] || { count: 0, last: 0 }
-  commandUsage = {
-    ...commandUsage,
-    [id]: { count: Math.min(999, old.count + 1), last: Date.now() }
-  }
-  storageWrite(COMMAND_USAGE_KEY, commandUsage)
+  clearFormat: '<span class="context-menu-letter">T</span><span class="context-menu-slash"></span>',
+  settings: '<svg viewBox="0 0 16 16"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h9M14 12h0"/><circle cx="10.5" cy="4" r="1.5"/><circle cx="5.5" cy="8" r="1.5"/><circle cx="12.5" cy="12" r="1.5"/></svg>'
 }
 
 const QUICK_ACTIONS = {
@@ -2610,11 +2587,17 @@ const QUICK_ACTIONS = {
 const CONTEXT_PREFS_KEY = 'wordlite.contextMenu.v1'
 const CONTEXT_PIN_LIMIT = 3
 
+// 没有手动固定时按场景给 3 个默认常用项：位置固定，不随使用历史变化。
+const CONTEXT_DEFAULTS = {
+  selection: ['bold', 'highlight', 'clearFormat'],
+  empty: ['paragraph', 'insertTable', 'pageSetup']
+}
+
 function normalizeContextPrefs (raw) {
   const pins = Array.isArray(raw?.pins)
     ? [...new Set(raw.pins.filter((id) => QUICK_ACTIONS[id]))].slice(0, CONTEXT_PIN_LIMIT)
     : []
-  return { pins, autoRecent: raw?.autoRecent !== false }
+  return { pins }
 }
 
 let contextPrefs = normalizeContextPrefs(storageRead(CONTEXT_PREFS_KEY, {}))
@@ -2625,27 +2608,25 @@ function saveContextPrefs () {
 }
 
 function quickMenuItems (kind, state) {
-  const allowed = Object.entries(QUICK_ACTIONS)
-    .filter(([, action]) => action.available(kind, state))
-  const allowedIds = new Set(allowed.map(([id]) => id))
-  // 手动固定项优先；自动区只补“最近使用过”的、未被固定项占用的功能。
-  const pinned = contextPrefs.pins.filter((id) => allowedIds.has(id))
-  const recent = contextPrefs.autoRecent
-    ? allowed
-      .filter(([id]) => commandUsage[id] && !pinned.includes(id))
-      .sort((a, b) => (commandUsage[b[0]].last || 0) - (commandUsage[a[0]].last || 0))
-      .map(([id]) => id)
-    : []
-  const ids = [...new Set([...pinned, ...recent])].slice(0, CONTEXT_PIN_LIMIT)
-  return ids.map((id) => {
+  const hasSelection = kind === 'text' && !state.selection.empty
+  const defaults = hasSelection ? CONTEXT_DEFAULTS.selection : CONTEXT_DEFAULTS.empty
+  // 固定项永远排在最前、顺序不变；不够 3 个时用当前场景的默认项补齐。
+  const ids = [...contextPrefs.pins]
+  for (const id of defaults) {
+    if (ids.length >= CONTEXT_PIN_LIMIT) break
+    if (ids.includes(id)) continue
+    if (!QUICK_ACTIONS[id].available(kind, state)) continue
+    ids.push(id)
+  }
+  return ids.slice(0, CONTEXT_PIN_LIMIT).map((id) => {
     const action = QUICK_ACTIONS[id]
     return {
       label: action.label,
       shortcut: action.shortcut,
       icon: action.icon,
       quick: true,
+      enabled: action.available(kind, state),
       run: () => {
-        noteCommandUse(id)
         action.run()
         syncToolbar()
       }
@@ -2750,7 +2731,14 @@ function contextMenuItemsFor (kind, state) {
     ...items,
     pasteItem,
     selectAllItem,
-    ...(quick.length ? [{ separator: true }, ...quick] : []),
+    ...(quick.length
+      ? [
+          { separator: true },
+          { heading: '常用' },
+          ...quick,
+          { label: '管理常用…', icon: MENU_ICONS.settings, run: openContextMenuSettings }
+        ]
+      : []),
     { separator: true },
     insertImageItem
   ]
@@ -2772,6 +2760,13 @@ function buildContextMenu (items) {
       const line = document.createElement('div')
       line.className = 'context-menu-separator'
       contextMenuList.appendChild(line)
+      continue
+    }
+    if (item.heading) {
+      const heading = document.createElement('div')
+      heading.className = 'context-menu-heading'
+      heading.textContent = item.heading
+      contextMenuList.appendChild(heading)
       continue
     }
     const button = document.createElement('button')
@@ -4768,7 +4763,6 @@ function cancelThemePreview () {
 const contextPinList = document.querySelector('#contextPinList')
 const contextPinMenu = document.querySelector('#contextPinMenu')
 const btnAddContextPin = document.querySelector('#btnAddContextPin')
-const settingsAutoContext = document.querySelector('#settingsAutoContext')
 
 function contextActionRow (id) {
   const action = QUICK_ACTIONS[id]
@@ -4848,11 +4842,21 @@ function populateSettingsForm (source = settings) {
 function openSettings () {
   settingsThemeBackup = currentTheme
   settingsPinsDraft = [...contextPrefs.pins]
-  settingsAutoContext.checked = contextPrefs.autoRecent
   contextPinMenu.hidden = true
   renderContextPins()
   populateSettingsForm()
   if (!settingsDialog.open) settingsDialog.showModal()
+}
+
+// 右键菜单里的「管理常用…」：打开设置并直接落到固定项区域。
+// 还有空位时顺手展开候选功能，用户不用再找「＋ 添加」。
+function openContextMenuSettings () {
+  openSettings()
+  requestAnimationFrame(() => {
+    contextPinList.scrollIntoView({ block: 'center' })
+    if (settingsPinsDraft.length < CONTEXT_PIN_LIMIT) renderContextPinMenu()
+    btnAddContextPin.focus({ preventScroll: true })
+  })
 }
 
 document.querySelector('#btnOpenSettings').addEventListener('click', openSettings)
@@ -4883,8 +4887,7 @@ document.querySelector('#settingsForm').addEventListener('submit', (event) => {
   })
   storageWrite(SETTINGS_KEY, settings)
   contextPrefs = normalizeContextPrefs({
-    pins: settingsPinsDraft || contextPrefs.pins,
-    autoRecent: settingsAutoContext.checked
+    pins: settingsPinsDraft || contextPrefs.pins
   })
   saveContextPrefs()
   settingsPinsDraft = null

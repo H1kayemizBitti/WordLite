@@ -647,17 +647,13 @@
         <small>工具栏图标悬停动画与放大</small>
       </label>
       <h3 class="settings-section-title">右键常用</h3>
+      <p class="dialog-note context-pin-guide">右键菜单里的「常用」区最多 3 个。点「＋ 添加」选择功能；固定项按添加顺序显示，位置不会变。没有固定时，按当前场景显示默认项（选中文字：加粗 / 高亮 / 清除格式；未选中：段落设置 / 插入表格 / 页面设置）。</p>
       <div class="context-pref-row">
         <div class="context-pin-list" id="contextPinList"></div>
-        <button class="tbtn" id="btnAddContextPin" type="button" title="添加一个右键常用功能">＋ 添加</button>
+        <button class="tbtn" id="btnAddContextPin" type="button" title="添加一个固定到右键「常用」区的功能（最多 3 个）">＋ 添加</button>
       </div>
       <div class="context-pin-menu" id="contextPinMenu" hidden></div>
-      <label class="settings-check">
-        <input id="settingsAutoContext" type="checkbox" checked>
-        <span>自动加入最近使用</span>
-        <small>最多显示 3 个</small>
-      </label>
-      <p class="dialog-note theme-note">右键菜单默认只有复制、粘贴等基础项；这里添加的功能会出现在「常用」区。</p>
+      <p class="dialog-note theme-note">也可以直接右键正文，点菜单里的「管理常用…」回到这里添加。图片和表格继续使用专用右键菜单。</p>
       <h3 class="settings-section-title">默认格式</h3>
       <div class="form-grid">
         <label for="settingsFont">默认字体</label>
@@ -928,7 +924,7 @@
         <li>双击图片（或选中后按 Enter）打开右侧编辑面板；改宽度、环绕时正文实时重排，按 Enter 或 Ctrl+Enter 完成（光标在输入框里时 Enter 只确认那一个字段）、Esc 取消。</li>
         <li>图片面板里点「裁剪…」或按 C 进裁剪：图片露出完整原图，拖四边四角调框，可按自由 / 原图 / 1:1 / 4:3 / 16:9 / 3:4 锁定比例；Enter 应用、Esc 取消，手柄可用 Tab 聚焦、方向键每次 1px（Shift 10px）。</li>
         <li>查看大图：右键「查看大图」、图片面板里的按钮，或选中图片后按空格。滚轮缩放（10%–800%，以指针为中心，Ctrl+滚轮和触控板捏合同样有效），拖动平移，双击在适合窗口和 100% 之间切换，Esc 关闭。只看不改，不改文档也不进撤销栈。</li>
-        <li><strong>右键菜单</strong>：在灰色区域、正文、表格、图片上右键都会弹出简写自己的菜单（复制 / 剪切 / 粘贴 / 全选 / 插入图片 / 图片设置 / 裁剪 / 查看大图 / 删除等），不会出现浏览器的「刷新」，误点也不会丢稿。没有鼠标时按 Shift+F10 或菜单键也能弹出，方向键选择、Enter 执行、Esc 关闭。F5、Ctrl+R、Ctrl+Shift+R、Windows 上的 Alt+← 都不会重载文档；正文里的 Ctrl+R 照常是「右对齐」。</li>
+        <li><strong>右键菜单</strong>：在灰色区域、正文、表格、图片上右键都会弹出简写自己的菜单（复制 / 剪切 / 粘贴 / 全选 / 插入图片 / 图片设置 / 裁剪 / 查看大图 / 删除等），不会出现浏览器的「刷新」，误点也不会丢稿。菜单里的「常用」区可在「设置 → 右键常用」点「＋ 添加」手动固定最多 3 个；未固定时显示当前场景默认项，也可以直接点菜单里的「管理常用…」。没有鼠标时按 Shift+F10 或菜单键也能弹出，方向键选择、Enter 执行、Esc 关闭。F5、Ctrl+R、Ctrl+Shift+R、Windows 上的 Alt+← 都不会重载文档；正文里的 Ctrl+R 照常是「右对齐」。</li>
         <li>Ctrl+F 查找、Ctrl+H 替换；F1 随时打开帮助。</li>
       </ul>
 

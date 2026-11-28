@@ -768,6 +768,13 @@ html[data-motion="off"] .tbtn.ic:focus-visible svg { transform: none; }
   background: var(--border);
 }
 
+.context-menu-heading {
+  padding: 4px 10px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
 /* ---------- 编辑区 ---------- */
 
 #workspace {
@@ -2180,10 +2187,12 @@ body.pdf-capture .ProseMirror [data-resize-container].in-selection [data-resize-
 }
 
 .context-pin-list:empty::before {
-  content: '还没有手动添加';
+  content: '还没有固定项，右键会显示当前场景默认项';
   font-size: 11.5px;
   color: var(--text-dim);
 }
+
+.context-pin-guide { margin: 0 0 8px; }
 
 .context-pin-chip {
   display: inline-flex;

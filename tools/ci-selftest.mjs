@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 
 const PREFIX = '[selftest] '
 const REQUIRED_BOOL = [
-  'bridge', 'tauri', 'editor', 'openedNewWindow', 'blankDragOk', 'contextMenuOk', 'printPreviewRemoved',
+  'bridge', 'tauri', 'editor', 'openedNewWindow', 'blankDragOk', 'contextMenuOk', 'contextMenuQuick', 'printPreviewRemoved',
   // 页面缩放：控件在、缩放生效、排版像素不变、外层缩放容器跟随、能回 100%
   'pageZoomControls', 'pageZoomShrinks', 'pageZoomKeepsLayout', 'pageZoomScaler', 'pageZoomReset',
   // 触控板捏合：预览不写存储、松手落定、有弹窗时忽略、WebView2 合成 wheel 能驱动缩放

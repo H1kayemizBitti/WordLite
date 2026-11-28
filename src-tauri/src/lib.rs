@@ -2452,6 +2452,11 @@ pub fn run() {
                                 results.textMenuOpen = !menu.hidden;
                                 results.textMenuItems = itemsOf();
                                 results.textMenuHasRefresh = itemsOf().some((label) => label.includes('刷新'));
+                                // 右键「常用」：固定场景默认项 + 管理入口，不再按最近使用换位
+                                results.contextMenuQuick = !!menu.querySelector('.context-menu-heading') &&
+                                    menu.querySelector('.context-menu-heading').textContent === '常用' &&
+                                    results.textMenuItems.some((label) => label.includes('管理常用')) &&
+                                    results.textMenuItems.some((label) => label.includes('段落设置'));
                                 // 从别处点到选区外面：光标跟到点击处，菜单里只剩没有选区时的项
                                 ed2.chain().focus().setTextSelection({{ from: 1, to: 6 }}).run();
                                 const secondLine = editorEl.querySelectorAll('p')[1].getBoundingClientRect();
@@ -2499,6 +2504,7 @@ pub fn run() {
                                 results.menuClosedAfterImage = menu.hidden;
                             }} catch (menuError) {{
                                 results.textMenuOpen = false;
+                                results.contextMenuQuick = false;
                                 results.menuError = String(menuError);
                             }}
                             // 5) Shift+F10 在光标处打开、方向键 + Tab 不跑出菜单；Esc 先关菜单，查找栏还在
@@ -2542,6 +2548,7 @@ pub fn run() {
                                 results.keyboardMenuError = String(keyboardError);
                             }}
                             results.contextMenuOk = !!(results.textMenuOpen && results.blankMenuOpen &&
+                                results.contextMenuQuick &&
                                 results.ribbonContextPrevented && !results.ribbonMenuOpen &&
                                 results.imageSelected && results.imageMenuHasSettings &&
                                 results.keyboardMenuOpen && results.escClosedMenu &&
